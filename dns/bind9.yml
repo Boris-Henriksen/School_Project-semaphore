@@ -11,10 +11,10 @@
         update_cache: yes
 
     - name: Include forward zone tasks
-      include_tasks: dns/forward_zone.yml
+      include_tasks: forward_zone.yml
 
     - name: Include reverse zone tasks
-      include_tasks: dns/reverse_zones.yml
+      include_tasks: reverse_zones.yml
 
   handlers:
     - name: restart bind9
