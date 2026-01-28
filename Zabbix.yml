@@ -18,7 +18,7 @@
 
   tasks:
     - name: Install required Ansible collections (community.mysql)
-      ansible.builtin.ansible_galaxy:
+      ansible.builtin.ansible:
         name: community.mysql
         type: collection
         state: present
