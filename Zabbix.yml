@@ -17,6 +17,11 @@
     php_timezone: "Europe/Copenhagen"
 
   tasks:
+    - name: Update apt cache and upgrade system
+      ansible.builtin.apt:
+        update_cache: yes
+        upgrade: dist
+    
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
@@ -28,7 +33,6 @@
           - python3-pymysql
         state: present
         update_cache: true
-        upgrade: dist
 
     - name: Install MariaDB server
       ansible.builtin.apt:
