@@ -1,5 +1,5 @@
 ---
-- name: Install Zabbix Server on Ubuntu (All-in-One)
+- name: Install Zabbix Server on Ubuntu
   hosts: Zabbix_Server
   become: true
 
@@ -17,12 +17,6 @@
     php_timezone: "Europe/Copenhagen"
 
   tasks:
-    - name: Install required Ansible collections (community.mysql)
-      ansible.builtin.ansible:
-        name: community.mysql
-        type: collection
-        state: present
-
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
