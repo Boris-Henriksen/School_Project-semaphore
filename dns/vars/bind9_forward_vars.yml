@@ -1,17 +1,18 @@
-zone_name: be.local
-ttl: 86400
-serial: 2026012801
+variables:
+  zone_name: be.local
+  ttl: 86400
+  serial: 2026012801
 
-# NS records — only master for now
-ns_records:
-  - ns1
+  # NS records — only master for now
+  ns_records:
+    - ns1
 
-# A records
-a_records:
-  - name: ns1
-    ip: 10.20.10.111
-  - name: proxmox-node1
-    ip: 10.20.10.11
-# CNAME records
-cname_records: []
+  # A records
+  a_records:
+    - name: ns1
+      ip: 10.20.10.111
+    - name: proxmox-node1
+      ip: 10.20.10.11
+  # CNAME records
+  cname_records: []
   
