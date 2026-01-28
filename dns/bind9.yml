@@ -1,8 +1,8 @@
 - hosts: dns
   become: true
   vars_files:
-    - dns/vars/bind9_forward_vars.yml
-    - dns/vars/bind9_reverse_vars.yml
+    - vars/bind9_forward_vars.yml
+    - vars/bind9_reverse_vars.yml
   tasks:
     - name: Install BIND9
       apt:
