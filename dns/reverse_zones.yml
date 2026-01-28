@@ -1,0 +1,14 @@
+- name: Deploy reverse DNS zones
+  loop: "{{ reverse_zones }}"
+  loop_control:
+    loop_var: rz
+  template:
+    src: dns/templates/db.reverse.zone.j2
+    dest: "/etc/bind/db.{{ rz.zone_name }}"
+  notify: restart bind9
+
+- name: Ensure BIND9 service running
+  service:
+    name: bind9
+    state: started
+    enabled: yes
