@@ -21,11 +21,17 @@
       ansible.builtin.apt:
         update_cache: yes
         upgrade: dist
-    
+        
+    - name: Ensure universe repository is enabled
+      ansible.builtin.apt_repository:
+        repo: "deb http://archive.ubuntu.com/ubuntu lunar universe"
+        state: present
+
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
           - libldap-2.5-0
+          - snmpd
           - curl
           - gnupg
           - ca-certificates
