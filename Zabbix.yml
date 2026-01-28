@@ -25,7 +25,7 @@
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
-          - libldap-2.4-2
+          - libldap-2.5-0
           - curl
           - gnupg
           - ca-certificates
