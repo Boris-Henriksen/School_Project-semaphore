@@ -51,6 +51,15 @@
         state: present
         update_cache: yes
 
+    - name: Ensure BIND zones directory exists
+      file:
+        path: /etc/bind/zones
+        state: directory
+        owner: root
+        group: bind
+        mode: '0755'
+
+
     # --- Forward Zone ---
     - name: Deploy forward DNS zone file
       template:
