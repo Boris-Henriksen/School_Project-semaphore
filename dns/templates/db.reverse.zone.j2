@@ -1,4 +1,5 @@
 $TTL {{ item.ttl }}
+{% if item.ptr_records | length > 0 %}
 @   IN  SOA {{ item.ptr_records[0].hostname | regex_replace('\\..*$', '') }}. admin.{{ item.ptr_records[0].hostname | regex_replace('\\..*$', '') }}. (
     {{ item.serial }}
     3600
@@ -8,11 +9,13 @@ $TTL {{ item.ttl }}
 )
 
 # NS Records (first PTR host)
-{% if item.ptr_records | length > 0 %}
 @   IN  NS {{ item.ptr_records[0].hostname | regex_replace('\\..*$', '') }}.
-{% endif %}
 
 # PTR Records
 {% for r in item.ptr_records %}
 {{ r.ip_last_octet }}   IN  PTR   {{ r.hostname }}
 {% endfor %}
+
+{% else %}
+; no PTR records defined for this zone
+{% endif %}
