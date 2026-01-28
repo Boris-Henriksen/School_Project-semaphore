@@ -1,0 +1,13 @@
+// Forward zone
+zone "{{ zone_name }}" {
+    type master;
+    file "/etc/bind/zones/{{ zone_name }}.db";
+};
+
+{% for rz in reverse_zones %}
+// Reverse zone
+zone "{{ rz.zone_name }}" {
+    type master;
+    file "/etc/bind/zones/{{ rz.zone_name }}.db";
+};
+{% endfor %}
