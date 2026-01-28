@@ -63,6 +63,7 @@
         host_all: true
         check_implicit_admin: true
         priv: "*.*:ALL,GRANT"
+        plugin: mysql_native_password
       ignore_errors: true
 
     - name: Create Zabbix database
