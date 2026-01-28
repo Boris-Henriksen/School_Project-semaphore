@@ -20,6 +20,7 @@
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
+          - libldap-2.4-2
           - curl
           - gnupg
           - ca-certificates
@@ -27,6 +28,7 @@
           - python3-pymysql
         state: present
         update_cache: true
+        upgrade: dist
 
     - name: Install MariaDB server
       ansible.builtin.apt:
@@ -68,7 +70,7 @@
 
     - name: Download Zabbix 7 repository package
       ansible.builtin.get_url:
-        url: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_{{ zabbix_version }}-1+ubuntu22.04_all.deb"
+        url: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_{{ zabbix_version }}-1+ubuntu24.04_all.deb"
         dest: /tmp/zabbix-release.deb
 
     - name: Install Zabbix repository
