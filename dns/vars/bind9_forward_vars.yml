@@ -1,18 +1,15 @@
 zone_name: be.local
 ttl: 86400
-serial: 2026010101
+serial: 2026012801
 
-# NS records
+# NS records — only master for now
 ns_records:
   - ns1
-  - ns2
 
 # A records
 a_records:
   - name: ns1
     ip: 10.20.1.10
-  - name: ns2
-    ip: 10.20.1.11
   - name: www
     ip: 10.20.1.20
   - name: mail
