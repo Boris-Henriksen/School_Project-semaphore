@@ -1,16 +1,28 @@
 ---
-- hosts: Zabbix_Server
+- name: Install Zabbix Server on Ubuntu (All-in-One)
+  hosts: Zabbix_Server
   become: true
+
   vars:
+    ansible_python_interpreter: /usr/bin/python3
+
     zabbix_version: "7.0"
     ubuntu_codename: "jammy"
+
     db_root_password: "Merc1234!"
     zabbix_db_name: "zabbix"
     zabbix_db_user: "zabbix"
     zabbix_db_password: "Merc1234!"
+
     php_timezone: "Europe/Copenhagen"
 
   tasks:
+    - name: Install required Ansible collections (community.mysql)
+      ansible.builtin.ansible_galaxy:
+        name: community.mysql
+        type: collection
+        state: present
+
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
@@ -18,6 +30,7 @@
           - gnupg
           - ca-certificates
           - lsb-release
+          - python3-pymysql
         state: present
         update_cache: true
 
@@ -34,12 +47,11 @@
 
     - name: Set MariaDB root password
       community.mysql.mysql_user:
-        login_user: root
-        login_password: ""
+        login_unix_socket: /var/run/mysqld/mysqld.sock
         name: root
         password: "{{ db_root_password }}"
-        host_all: yes
-        check_implicit_admin: yes
+        host_all: true
+        check_implicit_admin: true
         priv: "*.*:ALL,GRANT"
       ignore_errors: true
 
@@ -62,7 +74,7 @@
 
     - name: Download Zabbix 7 repository package
       ansible.builtin.get_url:
-        url: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_{{ zabbix_version }}-1+ubuntu24.04_all.deb"
+        url: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_{{ zabbix_version }}-1+ubuntu22.04_all.deb"
         dest: /tmp/zabbix-release.deb
 
     - name: Install Zabbix repository
@@ -85,7 +97,19 @@
           - php-fpm
         state: present
 
-    - name: Configure PHP timezone for Zabbix
+    - name: Import Zabbix database schema
+      ansible.builtin.shell: |
+        zcat /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | \
+        mysql -u{{ zabbix_db_user }} -p{{ zabbix_db_password }} {{ zabbix_db_name }}
+      args:
+        creates: /var/lib/mysql/.zabbix_schema_imported
+
+    - name: Mark schema as imported
+      ansible.builtin.file:
+        path: /var/lib/mysql/.zabbix_schema_imported
+        state: touch
+
+    - name: Configure PHP timezone
       ansible.builtin.lineinfile:
         path: /etc/php/8.2/fpm/php.ini
         regexp: '^;?date.timezone'
@@ -93,13 +117,15 @@
       notify: Restart PHP-FPM
 
     - name: Configure Zabbix server database
-      ansible.builtin.copy:
-        dest: /etc/zabbix/zabbix_server.conf
-        content: |
-          DBHost=localhost
-          DBName={{ zabbix_db_name }}
-          DBUser={{ zabbix_db_user }}
-          DBPassword={{ zabbix_db_password }}
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: '^#?DB'
+        line: "{{ item }}"
+      loop:
+        - "DBHost=localhost"
+        - "DBName={{ zabbix_db_name }}"
+        - "DBUser={{ zabbix_db_user }}"
+        - "DBPassword={{ zabbix_db_password }}"
 
     - name: Enable and start services
       ansible.builtin.service:
@@ -107,6 +133,7 @@
         state: started
         enabled: true
       loop:
+        - mariadb
         - nginx
         - php8.2-fpm
         - zabbix-agent2
