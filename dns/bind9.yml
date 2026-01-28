@@ -1,8 +1,48 @@
 - hosts: dns
   become: true
-  vars_files:
-    - "{{ playbook_dir }}/vars/bind9_forward_vars.yml"
-    - "{{ playbook_dir }}/vars/bind9_reverse_vars.yml"
+  vars:
+    # --- Forward Zone Variables ---
+    zone_name: be.local
+    ttl: 86400
+    serial: 2026012801
+
+    ns_records:
+      - ns1
+
+    a_records:
+      - name: ns1
+        ip: 10.20.10.111
+      - name: proxmox-node1
+        ip: 10.20.10.11
+
+    cname_records: []
+
+    # --- Reverse Zone Variables ---
+    reverse_zones:
+      - zone_name: "1.20.10.in-addr.arpa"
+        ttl: 86400
+        serial: 2026012801
+        ptr_records:
+          - ip_last_octet: 111
+            hostname: ns1.be.local.
+          - ip_last_octet: 11
+            hostname: proxmox-node1.be.local.
+      - zone_name: "2.20.10.in-addr.arpa"
+        ttl: 86400
+        serial: 2026012801
+        ptr_records: []
+      - zone_name: "10.20.10.in-addr.arpa"
+        ttl: 86400
+        serial: 2026012801
+        ptr_records: []
+      - zone_name: "40.20.10.in-addr.arpa"
+        ttl: 86400
+        serial: 2026012801
+        ptr_records: []
+      - zone_name: "99.20.10.in-addr.arpa"
+        ttl: 86400
+        serial: 2026012801
+        ptr_records: []
 
   tasks:
     - name: Install BIND9
@@ -11,20 +51,21 @@
         state: present
         update_cache: yes
 
-    - name: Include forward zone tasks
-      include_tasks: forward_zone.yml
-      vars:
-        f_zone_name: "{{ zone_name }}"
-        f_ns_records: "{{ ns_records }}"
-        f_a_records: "{{ a_records }}"
-        f_cname_records: "{{ cname_records }}"
-        f_ttl: "{{ ttl }}"
-        f_serial: "{{ serial }}"
+    # --- Forward Zone ---
+    - name: Deploy forward DNS zone file
+      template:
+        src: templates/db.zone.j2
+        dest: /etc/bind/zones/{{ zone_name }}.db
 
-        
-    - name: Include reverse zone tasks
-      include_tasks: reverse_zones.yml
-    
+    # --- Reverse Zones ---
+    - name: Deploy reverse DNS zone files
+      template:
+        src: templates/db.reverse.zone.j2
+        dest: "/etc/bind/zones/{{ item.zone_name }}.db"
+      loop: "{{ reverse_zones }}"
+      loop_control:
+        label: "{{ item.zone_name }}"
+
   handlers:
     - name: restart bind9
       service:
