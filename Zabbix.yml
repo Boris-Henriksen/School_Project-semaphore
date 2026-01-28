@@ -142,7 +142,6 @@
         line: "date.timezone = {{ php_timezone }}"
       notify: Restart PHP-FPM
 
-
     # ---------------------------
     # Configure Zabbix server
     # ---------------------------
@@ -171,9 +170,12 @@
         - "php{{ php_version_cmd.stdout }}-fpm"
         - zabbix-agent2
         - zabbix-server
-        
-      handlers:
-        - name: Restart PHP-FPM
-          ansible.builtin.service:
-            name: "php{{ php_version_cmd.stdout }}-fpm"
-            state: restarted
+
+# ---------------------------
+# Handlers
+# ---------------------------
+handlers:
+  - name: Restart PHP-FPM
+    ansible.builtin.service:
+      name: "php{{ php_version_cmd.stdout }}-fpm"
+      state: restarted
