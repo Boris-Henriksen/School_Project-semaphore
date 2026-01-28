@@ -1,1 +1,12 @@
+- name: Deploy zone file
+  template:
+    src: dns/templates/db.zone.j2
+    dest: "/etc/bind/db.{{ zone_name }}"
+  notify: restart bind9
+
+- name: Ensure bind9 service is running
+  service:
+    name: bind9
+    state: started
+    enabled: yes
 
