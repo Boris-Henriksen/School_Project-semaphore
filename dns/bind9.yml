@@ -2,6 +2,7 @@
   become: true
   vars_files:
     - dns/vars/bind9_vars.yml
+    - dns/vars/bind9_reverse_vars.yml
   tasks:
     - name: Install BIND9
       apt:
@@ -9,6 +10,14 @@
         state: present
         update_cache: yes
 
-    - name: Include zone tasks
+    - name: Include forward zone tasks
       include_tasks: dns/zones.yml
 
+    - name: Include reverse zone tasks
+      include_tasks: dns/reverse_zones.yml
+
+  handlers:
+    - name: restart bind9
+      service:
+        name: bind9
+        state: restarted
