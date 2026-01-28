@@ -3,7 +3,7 @@
   loop_control:
     loop_var: rz
   template:
-    src: dns/templates/db.reverse.zone.j2
+    src: templates/db.reverse.zone.j2
     dest: "/etc/bind/db.{{ rz.zone_name }}"
   notify: restart bind9
 
