@@ -1,20 +1,23 @@
-$TTL {{ f_ttl }}
-@   IN  SOA {{ (f_ns_records | default(['ns1']))[0] }}.{{ f_zone_name }}. admin.{{ f_zone_name }}. (
-    {{ f_serial }}
+$TTL {{ ttl }}
+@   IN  SOA {{ ns_records[0] }}.{{ zone_name }}. admin.{{ zone_name }}. (
+    {{ serial }}
     3600
     1800
     604800
     86400
 )
 
-{% for ns in f_ns_records | default(['ns1']) %}
-@   IN  NS {{ ns }}.{{ f_zone_name }}.
+# NS Records
+{% for ns in ns_records %}
+@   IN  NS {{ ns }}.{{ zone_name }}.
 {% endfor %}
 
-{% for r in f_a_records | default([]) %}
+# A Records
+{% for r in a_records %}
 {{ r.name }}   IN  A   {{ r.ip }}
 {% endfor %}
 
-{% for c in f_cname_records | default([]) %}
-{{ c.name }}   IN  CNAME  {{ c.alias }}.{{ f_zone_name }}.
+# CNAME Records
+{% for c in cname_records %}
+{{ c.name }}   IN  CNAME  {{ c.alias }}.{{ zone_name }}.
 {% endfor %}
