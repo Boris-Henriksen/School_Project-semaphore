@@ -168,12 +168,12 @@
       loop:
         - mariadb
         - nginx
-        - php8.2-fpm
+        - php-fpm
         - zabbix-agent2
         - zabbix-server
 
   handlers:
     - name: Restart PHP-FPM
       ansible.builtin.service:
-        name: php8.2-fpm
+        name: php-fpm
         state: restarted
