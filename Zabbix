@@ -1,0 +1,5 @@
+- name: Install Zabbix 7 on Ubuntu
+  hosts: zabbix
+  become: yes
+  roles:
+    - zabbix
