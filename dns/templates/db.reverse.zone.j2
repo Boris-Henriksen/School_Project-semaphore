@@ -1,0 +1,16 @@
+$TTL {{ ttl }}
+@   IN  SOA {{ ptr_records[0].hostname | regex_replace('\\..*$', '') }}. admin.{{ ptr_records[0].hostname | regex_replace('\\..*$', '') }}. (
+    {{ serial }}
+    3600
+    1800
+    604800
+    86400
+)
+
+# NS Records (first PTR host)
+@   IN  NS {{ ptr_records[0].hostname | regex_replace('\\..*$', '') }}.
+
+# PTR Records
+{% for r in ptr_records %}
+{{ r.ip_last_octet }}   IN  PTR   {{ r.hostname }}
+{% endfor %}
