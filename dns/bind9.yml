@@ -12,10 +12,21 @@
 
     - name: Include forward zone tasks
       include_tasks: forward_zone.yml
-
+      vars:
+        zone_name: "{{ zone_name }}"
+        ttl: "{{ ttl }}"
+        serial: "{{ serial }}"
+        ns_records: "{{ ns_records }}"
+        a_records: "{{ a_records }}"
+        cname_records: "{{ cname_records }}"
+        
     - name: Include reverse zone tasks
       include_tasks: reverse_zones.yml
-
+      vars:
+        reverse_zones: "{{ reverse_zones }}"
+        ttl: "{{ ttl }}"
+        serial: "{{ serial }}"
+    
   handlers:
     - name: restart bind9
       service:
