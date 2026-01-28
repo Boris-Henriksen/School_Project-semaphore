@@ -170,6 +170,11 @@
         - "php{{ php_version_cmd.stdout }}-fpm"
         - zabbix-agent2
         - zabbix-server
+    - name: Remove default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload Nginx
 
 # ---------------------------
 # Handlers
@@ -179,3 +184,8 @@
       ansible.builtin.service:
         name: "php{{ php_version_cmd.stdout }}-fpm"
         state: restarted
+        
+    - name: Reload Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
