@@ -111,8 +111,8 @@
           - zabbix-sql-scripts
           - zabbix-agent2
           - nginx
-          - php8.2-fpm
-          - php8.2-mysql
+          - php-fpm
+          - php-mysql
         state: present
 
     - name: Import Zabbix database schema
@@ -130,12 +130,18 @@
     # ---------------------------
     # Configure PHP
     # ---------------------------
+    - name: Get installed PHP version
+      ansible.builtin.command: php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"
+      register: php_version_cmd
+      changed_when: false
+
     - name: Configure PHP timezone
       ansible.builtin.lineinfile:
-        path: /etc/php/8.2/fpm/php.ini
+        path: "/etc/php/{{ php_version_cmd.stdout }}/fpm/php.ini"
         regexp: '^;?date.timezone'
         line: "date.timezone = {{ php_timezone }}"
       notify: Restart PHP-FPM
+
 
     # ---------------------------
     # Configure Zabbix server
