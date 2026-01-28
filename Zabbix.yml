@@ -1,45 +1,49 @@
 ---
-- name: Install Zabbix Server on Ubuntu
+- name: Install Zabbix Server on Ubuntu 24.04
   hosts: Zabbix_Server
   become: true
 
   vars:
     ansible_python_interpreter: /usr/bin/python3
-
     zabbix_version: "7.0"
-    ubuntu_codename: "jammy"
-
+    ubuntu_codename: "lunar"
     db_root_password: "Merc1234!"
     zabbix_db_name: "zabbix"
     zabbix_db_user: "zabbix"
     zabbix_db_password: "Merc1234!"
-
     php_timezone: "Europe/Copenhagen"
 
   tasks:
-    - name: Update apt cache and upgrade system
+    # ---------------------------
+    # Update and upgrade system
+    # ---------------------------
+    - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
-        upgrade: dist
-        
-    - name: Ensure universe repository is enabled
-      ansible.builtin.apt_repository:
-        repo: "deb http://archive.ubuntu.com/ubuntu lunar universe"
-        state: present
 
+    - name: Upgrade all packages
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: yes
+
+    # ---------------------------
+    # Install prerequisites
+    # ---------------------------
     - name: Install prerequisites
       ansible.builtin.apt:
         name:
-          - libldap-2.5-0
-          - snmpd
           - curl
           - gnupg
           - ca-certificates
           - lsb-release
           - python3-pymysql
+          - snmpd
         state: present
-        update_cache: true
+        update_cache: yes
 
+    # ---------------------------
+    # MariaDB
+    # ---------------------------
     - name: Install MariaDB server
       ansible.builtin.apt:
         name: mariadb-server
@@ -78,6 +82,9 @@
         login_user: root
         login_password: "{{ db_root_password }}"
 
+    # ---------------------------
+    # Zabbix repository
+    # ---------------------------
     - name: Download Zabbix 7 repository package
       ansible.builtin.get_url:
         url: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_{{ zabbix_version }}-1+ubuntu24.04_all.deb"
@@ -87,11 +94,14 @@
       ansible.builtin.apt:
         deb: /tmp/zabbix-release.deb
 
-    - name: Update apt cache
+    - name: Update apt cache after adding Zabbix repo
       ansible.builtin.apt:
-        update_cache: true
+        update_cache: yes
 
-    - name: Install Zabbix server, frontend, agent and NGINX
+    # ---------------------------
+    # Install Zabbix server & frontend
+    # ---------------------------
+    - name: Install Zabbix server, frontend, agent, and NGINX
       ansible.builtin.apt:
         name:
           - zabbix-server-mysql
@@ -115,6 +125,9 @@
         path: /var/lib/mysql/.zabbix_schema_imported
         state: touch
 
+    # ---------------------------
+    # Configure PHP
+    # ---------------------------
     - name: Configure PHP timezone
       ansible.builtin.lineinfile:
         path: /etc/php/8.2/fpm/php.ini
@@ -122,6 +135,9 @@
         line: "date.timezone = {{ php_timezone }}"
       notify: Restart PHP-FPM
 
+    # ---------------------------
+    # Configure Zabbix server
+    # ---------------------------
     - name: Configure Zabbix server database
       ansible.builtin.lineinfile:
         path: /etc/zabbix/zabbix_server.conf
@@ -133,6 +149,9 @@
         - "DBUser={{ zabbix_db_user }}"
         - "DBPassword={{ zabbix_db_password }}"
 
+    # ---------------------------
+    # Enable and start services
+    # ---------------------------
     - name: Enable and start services
       ansible.builtin.service:
         name: "{{ item }}"
