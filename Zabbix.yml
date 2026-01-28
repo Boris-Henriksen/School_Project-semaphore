@@ -111,7 +111,8 @@
           - zabbix-sql-scripts
           - zabbix-agent2
           - nginx
-          - php-fpm
+          - php8.2-fpm
+          - php8.2-mysql
         state: present
 
     - name: Import Zabbix database schema
