@@ -1,0 +1,23 @@
+zone_name: be.local
+ttl: 86400
+serial: 2026010101
+
+# NS records
+ns_records:
+  - ns1
+  - ns2
+
+# A records
+a_records:
+  - name: www
+    ip: 192.168.1.20
+  - name: mail
+    ip: 192.168.1.30
+
+# CNAME records
+cname_records:
+  - name: ftp
+    alias: www
+  - name: webmail
+    alias: mail
+
