@@ -1,5 +1,5 @@
 ---
-- hosts: zabbix_server
+- hosts: Zabbix_Server
   become: true
   vars:
     zabbix_version: "7.0"
