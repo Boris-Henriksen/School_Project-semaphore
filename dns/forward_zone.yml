@@ -1,7 +1,7 @@
 - name: Deploy forward DNS zone file
   template:
     src: templates/db.zone.j2
-    dest: "/etc/bind/db.{{ zone_name }}"
+    dest: /etc/bind/zones/{{ f_zone_name }}.db
   notify: restart bind9
 
 - name: Ensure BIND9 is running
