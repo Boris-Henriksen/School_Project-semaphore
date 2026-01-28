@@ -1,6 +1,6 @@
-$TTL {{ ttl }}
-@   IN  SOA {{ (ptr_records | default([{'hostname':'ns1.be.local.'}]))[0].hostname | regex_replace('\\..*$', '') }}. admin.{{ (ptr_records | default([{'hostname':'ns1.be.local.'}]))[0].hostname | regex_replace('\\..*$', '') }}. (
-    {{ serial }}
+$TTL {{ item.ttl }}
+@   IN  SOA {{ item.ptr_records[0].hostname | regex_replace('\\..*$', '') }}. admin.{{ item.ptr_records[0].hostname | regex_replace('\\..*$', '') }}. (
+    {{ item.serial }}
     3600
     1800
     604800
@@ -8,9 +8,11 @@ $TTL {{ ttl }}
 )
 
 # NS Records (first PTR host)
-@   IN  NS {{ (ptr_records | default([{'hostname':'ns1.be.local.'}]))[0].hostname | regex_replace('\\..*$', '') }}.
+{% if item.ptr_records | length > 0 %}
+@   IN  NS {{ item.ptr_records[0].hostname | regex_replace('\\..*$', '') }}.
+{% endif %}
 
 # PTR Records
-{% for r in ptr_records | default([]) %}
+{% for r in item.ptr_records %}
 {{ r.ip_last_octet }}   IN  PTR   {{ r.hostname }}
 {% endfor %}
