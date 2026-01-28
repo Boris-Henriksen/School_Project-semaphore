@@ -12,6 +12,14 @@
 
     - name: Include forward zone tasks
       include_tasks: forward_zone.yml
+      vars:
+        f_zone_name: "{{ zone_name }}"
+        f_ns_records: "{{ ns_records }}"
+        f_a_records: "{{ a_records }}"
+        f_cname_records: "{{ cname_records }}"
+        f_ttl: "{{ ttl }}"
+        f_serial: "{{ serial }}"
+
         
     - name: Include reverse zone tasks
       include_tasks: reverse_zones.yml
