@@ -94,7 +94,23 @@
         mode: '0644'
       notify:
         - restart bind9
+        
+    # --- Set Bind9 to resolve itself ---
+    - name: Set local DNS to 127.0.0.1
+      copy:
+        dest: /etc/netplan/01-dns-local.yaml
+        content: |
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                nameservers:
+                  addresses: [127.0.0.1]
+                  search: [be.local]
 
+    - name: Apply netplan
+      command: netplan apply
+      
   handlers:
     - name: restart bind9
       service:
