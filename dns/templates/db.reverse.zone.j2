@@ -8,10 +8,10 @@ $TTL {{ item.ttl }}
     86400
 )
 
-# NS Records (first PTR host)
+
 @   IN  NS {{ item.ptr_records[0].hostname | regex_replace('\\..*$', '') }}.
 
-# PTR Records
+
 {% for r in item.ptr_records %}
 {{ r.ip_last_octet }}   IN  PTR   {{ r.hostname }}
 {% endfor %}
