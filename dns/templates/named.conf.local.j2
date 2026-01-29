@@ -2,7 +2,7 @@
 zone "{{ zone_name }}" {
     type master;
     file "/etc/bind/zones/{{ zone_name }}.db";
-    allow-transfer { 10.20.10.222; };  # Slave IP
+    allow-transfer { 10.20.10.112; };  # Slave IP
 };
 
 {% for rz in reverse_zones %}
@@ -10,6 +10,6 @@ zone "{{ zone_name }}" {
 zone "{{ rz.zone_name }}" {
     type master;
     file "/etc/bind/zones/{{ rz.zone_name }}.db";
-    allow-transfer { 10.20.10.222; };  # Slave IP
+    allow-transfer { 10.20.10.112; };  # Slave IP
 };
 {% endfor %}
