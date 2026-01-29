@@ -69,14 +69,23 @@
         owner: www-data
         group: www-data
         recurse: yes
+        
+    - name: Get installed PHP version
+      ansible.builtin.command: php -r "echo PHP_VERSION;"
+      register: php_version_raw
+
+    - name: Set PHP major.minor version fact
+      ansible.builtin.set_fact:
+        php_version: "{{ php_version_raw.stdout | regex_search('^([0-9]+\\.[0-9]+)') }}"
 
     - name: Configure PHP timezone
       ansible.builtin.lineinfile:
-        path: "/etc/php/{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}/fpm/php.ini"
+        path: "/etc/php/{{ php_version }}/fpm/php.ini"
         regexp: '^;?date.timezone ='
         line: "date.timezone = {{ php_timezone }}"
         state: present
       notify: Restart PHP-FPM
+
 
     - name: Configure Nginx for phpIPAM
       ansible.builtin.copy:
