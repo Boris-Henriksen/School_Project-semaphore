@@ -19,7 +19,7 @@
 
     # --- Reverse Zone Variables ---
     reverse_zones:
-      - zone_name: "1.20.10.in-addr.arpa"
+      - zone_name: "10.20.10.in-addr.arpa"
         ttl: 86400
         serial: 2026012801
         ptr_records:
@@ -31,7 +31,7 @@
         ttl: 86400
         serial: 2026012801
         ptr_records: []
-      - zone_name: "10.20.10.in-addr.arpa"
+      - zone_name: "1.20.10.in-addr.arpa"
         ttl: 86400
         serial: 2026012801
         ptr_records: []
