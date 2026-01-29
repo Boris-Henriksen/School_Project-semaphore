@@ -55,17 +55,13 @@
       ansible.builtin.command: >
         mysql -uroot -p'{{ mysql_root_password }}' -e "CREATE USER IF NOT EXISTS '{{ phpipam_db_user }}'@'localhost' IDENTIFIED BY '{{ phpipam_db_password }}'; GRANT ALL PRIVILEGES ON {{ phpipam_db_name }}.* TO '{{ phpipam_db_user }}'@'localhost'; FLUSH PRIVILEGES;"
 
-    - name: Download phpIPAM
-      ansible.builtin.get_url:
-        url: "https://github.com/phpipam/phpipam/releases/download/{{ phpipam_version }}/phpipam-{{ phpipam_version }}.zip"
-        dest: "/tmp/phpipam.zip"
+    - name: Clone phpIPAM repository
+    ansible.builtin.git:
+      repo: 'https://github.com/phpipam/phpipam.git'
+      dest: '{{ phpipam_install_dir }}'
+      version: '1.7'  # specific release
+      recursive: yes
 
-    - name: Unzip phpIPAM
-      ansible.builtin.unarchive:
-        src: "/tmp/phpipam.zip"
-        dest: "{{ phpipam_install_dir }}"
-        copy: no
-        remote_src: yes
 
     - name: Set ownership for Nginx
       ansible.builtin.file:
