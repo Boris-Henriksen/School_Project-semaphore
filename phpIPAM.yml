@@ -1,12 +1,12 @@
 ---
 - name: Setup phpIPAM server with Nginx
-  hosts: phpIPAM
+  hosts: ipam_server
   become: true
   vars:
     phpipam_db_name: "phpipam"
     phpipam_db_user: "phpipamuser"
     phpipam_db_password: "Merc1234!"
-    phpipam_version: "1.7.4"  # adjust to latest release
+    phpipam_version: "1.5"  # adjust to latest release
     phpipam_install_dir: "/var/www/phpipam"
     mysql_root_password: "Merc1234!"
     server_name: "ipam.be.local"
@@ -43,28 +43,23 @@
         - nginx
         - mariadb
 
-    - name: Secure MariaDB installation
-      community.mysql.mysql_secure_installation:
-        login_password: ""
-        root_password: "{{ mysql_root_password }}"
-        remove_anonymous_users: yes
-        disallow_root_login_remotely: yes
-        remove_test_db: yes
-        change_root_password: yes
+    - name: Ensure MariaDB root password is set
+      ansible.builtin.shell: |
+        mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mysql_root_password }}';"
+      args:
+        warn: false
 
     - name: Create phpIPAM database
-      community.mysql.mysql_db:
-        name: "{{ phpipam_db_name }}"
-        state: present
-        encoding: utf8
-        collation: utf8_general_ci
+      ansible.builtin.shell: |
+        mysql -uroot -p'{{ mysql_root_password }}' -e "CREATE DATABASE IF NOT EXISTS {{ phpipam_db_name }} CHARACTER SET utf8 COLLATE utf8_general_ci;"
+      args:
+        warn: false
 
     - name: Create phpIPAM database user
-      community.mysql.mysql_user:
-        name: "{{ phpipam_db_user }}"
-        password: "{{ phpipam_db_password }}"
-        priv: "{{ phpipam_db_name }}.*:ALL"
-        state: present
+      ansible.builtin.shell: |
+        mysql -uroot -p'{{ mysql_root_password }}' -e "CREATE USER IF NOT EXISTS '{{ phpipam_db_user }}'@'localhost' IDENTIFIED BY '{{ phpipam_db_password }}'; GRANT ALL PRIVILEGES ON {{ phpipam_db_name }}.* TO '{{ phpipam_db_user }}'@'localhost'; FLUSH PRIVILEGES;"
+      args:
+        warn: false
 
     - name: Download phpIPAM
       ansible.builtin.get_url:
@@ -87,10 +82,11 @@
 
     - name: Configure PHP timezone
       ansible.builtin.lineinfile:
-        path: /etc/php/{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}/fpm/php.ini
+        path: "/etc/php/{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}/fpm/php.ini"
         regexp: '^;?date.timezone ='
         line: "date.timezone = {{ php_timezone }}"
         state: present
+      notify: Restart PHP-FPM
 
     - name: Configure Nginx for phpIPAM
       ansible.builtin.copy:
