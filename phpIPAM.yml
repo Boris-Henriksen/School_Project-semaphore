@@ -1,0 +1,140 @@
+---
+- name: Setup phpIPAM server with Nginx
+  hosts: ipam_server
+  become: true
+  vars:
+    phpipam_db_name: "phpipam"
+    phpipam_db_user: "phpipamuser"
+    phpipam_db_password: "StrongPass123!"
+    phpipam_version: "1.5"  # adjust to latest release
+    phpipam_install_dir: "/var/www/phpipam"
+    mysql_root_password: "RootPass123!"
+    server_name: "ipam.example.local"
+    php_timezone: "Europe/Copenhagen"
+
+  tasks:
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - mariadb-server
+          - php-fpm
+          - php-mysql
+          - php-gd
+          - php-cli
+          - php-curl
+          - php-mbstring
+          - php-xml
+          - unzip
+          - wget
+        state: present
+
+    - name: Start and enable Nginx and MariaDB
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - nginx
+        - mariadb
+
+    - name: Secure MariaDB installation
+      community.mysql.mysql_secure_installation:
+        login_password: ""
+        root_password: "{{ mysql_root_password }}"
+        remove_anonymous_users: yes
+        disallow_root_login_remotely: yes
+        remove_test_db: yes
+        change_root_password: yes
+
+    - name: Create phpIPAM database
+      community.mysql.mysql_db:
+        name: "{{ phpipam_db_name }}"
+        state: present
+        encoding: utf8
+        collation: utf8_general_ci
+
+    - name: Create phpIPAM database user
+      community.mysql.mysql_user:
+        name: "{{ phpipam_db_user }}"
+        password: "{{ phpipam_db_password }}"
+        priv: "{{ phpipam_db_name }}.*:ALL"
+        state: present
+
+    - name: Download phpIPAM
+      ansible.builtin.get_url:
+        url: "https://github.com/phpipam/phpipam/releases/download/{{ phpipam_version }}/phpipam-{{ phpipam_version }}.zip"
+        dest: "/tmp/phpipam.zip"
+
+    - name: Unzip phpIPAM
+      ansible.builtin.unarchive:
+        src: "/tmp/phpipam.zip"
+        dest: "{{ phpipam_install_dir }}"
+        copy: no
+        remote_src: yes
+
+    - name: Set ownership for Nginx
+      ansible.builtin.file:
+        path: "{{ phpipam_install_dir }}"
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: Configure PHP timezone
+      ansible.builtin.lineinfile:
+        path: /etc/php/{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}/fpm/php.ini
+        regexp: '^;?date.timezone ='
+        line: "date.timezone = {{ php_timezone }}"
+        state: present
+
+    - name: Configure Nginx for phpIPAM
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/phpipam
+        content: |
+          server {
+              listen 80;
+              server_name {{ server_name }};
+              
+              root {{ phpipam_install_dir }};
+              index index.php;
+
+              location / {
+                  try_files $uri $uri/ /index.php;
+              }
+
+              location ~ \.php$ {
+                  include snippets/fastcgi-php.conf;
+                  fastcgi_pass unix:/run/php/php{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}-fpm.sock;
+              }
+
+              location ~ /\.ht {
+                  deny all;
+              }
+          }
+
+    - name: Enable phpIPAM site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/phpipam
+        dest: /etc/nginx/sites-enabled/phpipam
+        state: link
+
+    - name: Remove default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+  handlers:
+    - name: Restart Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+
+    - name: Restart PHP-FPM
+      ansible.builtin.service:
+        name: "php{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}-fpm"
+        state: restarted
