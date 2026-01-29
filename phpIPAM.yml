@@ -6,7 +6,7 @@
     phpipam_db_name: "phpipam"
     phpipam_db_user: "phpipamuser"
     phpipam_db_password: "Merc1234!"
-    phpipam_version: "1.5"  # adjust to latest release
+    phpipam_version: "1.7.4"  # adjust to latest release
     phpipam_install_dir: "/var/www/phpipam"
     mysql_root_password: "Merc1234!"
     server_name: "ipam.be.local"
