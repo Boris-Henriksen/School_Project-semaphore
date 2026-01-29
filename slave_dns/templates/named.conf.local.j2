@@ -1,0 +1,5 @@
+zone "{{ zone_name }}" {
+    type master;
+    file "/etc/bind/zones/{{ zone_name }}.db";
+    allow-transfer { 10.20.10.222; };  # Replace with your slave IP
+};
