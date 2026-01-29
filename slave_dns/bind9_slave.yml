@@ -63,8 +63,8 @@
                 nameservers:
                   addresses: [127.0.0.1]
                   
-- name: Apply netplan
-  command: netplan apply
+    - name: Apply netplan
+      command: netplan apply
     
   handlers:
     - name: Restart BIND
