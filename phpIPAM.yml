@@ -1,6 +1,6 @@
 ---
 - name: Setup phpIPAM server with Nginx
-  hosts: ipam_server
+  hosts: phpIPAM
   become: true
   vars:
     phpipam_db_name: "phpipam"
