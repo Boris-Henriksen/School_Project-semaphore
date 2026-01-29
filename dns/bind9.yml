@@ -106,7 +106,6 @@
               eth0:
                 nameservers:
                   addresses: [127.0.0.1]
-                  search: [be.local]
 
     - name: Apply netplan
       command: netplan apply
