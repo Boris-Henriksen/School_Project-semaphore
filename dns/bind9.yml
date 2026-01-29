@@ -59,6 +59,16 @@
         group: bind
         mode: '0755'
 
+    - name: Deploy named.conf.options
+      template:
+        src: templates/named.conf.options.j2
+        dest: /etc/bind/named.conf.options
+        owner: root
+        group: bind
+        mode: '0644'
+      notify:
+        - restart bind9
+
 
     # --- Forward Zone ---
     - name: Deploy forward DNS zone file
