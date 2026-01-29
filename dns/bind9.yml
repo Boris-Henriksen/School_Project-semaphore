@@ -109,7 +109,14 @@
 
     - name: Apply netplan
       command: netplan apply
-      
+    
+    - name: Restart systemd-resolved to clear old DNS
+      systemd:
+        name: systemd-resolved
+        state: restarted
+
+    
+    
   handlers:
     - name: restart bind9
       service:
