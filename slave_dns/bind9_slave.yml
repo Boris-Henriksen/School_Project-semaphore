@@ -1,0 +1,58 @@
+---
+- name: Setup Slave DNS Server
+  hosts: slave_dns
+  become: true
+
+  vars:
+    master_ip: "10.20.10.111"   # Master DNS IP
+    slave_forwarders:
+      - "8.8.8.8"
+      - "8.8.4.4"
+
+  tasks:
+
+    - name: Install BIND9
+      apt:
+        name: bind9
+        state: present
+        update_cache: yes
+
+    - name: Configure named.conf.options
+      template:
+        src: templates/named.conf.options.j2
+        dest: /etc/bind/named.conf.options
+        owner: root
+        group: bind
+        mode: '0644'
+      notify: Restart BIND
+
+    - name: Configure named.conf.local for slave zones
+      copy:
+        dest: /etc/bind/named.conf.local
+        content: |
+          zone "be.local" {
+              type slave;
+              file "/var/cache/bind/db.be.local";
+              masters { {{ master_ip }}; };
+          };
+          zone "10.20.10.in-addr.arpa" {
+              type slave;
+              file "/var/cache/bind/db.10.20.10";
+              masters { {{ master_ip }}; };
+          };
+        owner: root
+        group: bind
+        mode: '0644'
+      notify: Restart BIND
+
+    - name: Ensure BIND9 is running and enabled
+      service:
+        name: bind9
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart BIND
+      service:
+        name: bind9
+        state: restarted
