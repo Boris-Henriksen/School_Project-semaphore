@@ -9,7 +9,7 @@
     phpipam_version: "1.5"  # adjust to latest release
     phpipam_install_dir: "/var/www/phpipam"
     mysql_root_password: "RootPass123!"
-    server_name: "ipam.example.local"
+    server_name: "ipam.be.local"
     php_timezone: "Europe/Copenhagen"
 
   tasks:
