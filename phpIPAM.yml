@@ -30,6 +30,8 @@
           - php-curl
           - php-mbstring
           - php-xml
+          - php-gmp
+          - php-pear
           - unzip
           - wget
         state: present
@@ -61,6 +63,15 @@
         dest: '{{ phpipam_install_dir }}'
         version: '1.7'  # specific release
         recursive: yes
+
+    - name: Create phpIPAM config.php from config.dist.php
+      ansible.builtin.copy:
+        src: "{{ phpipam_install_dir }}/config.dist.php"
+        dest: "{{ phpipam_install_dir }}/config.php"
+        owner: www-data
+        group: www-data
+        mode: '0640'
+        remote_src: yes
 
 
     - name: Set ownership for Nginx
