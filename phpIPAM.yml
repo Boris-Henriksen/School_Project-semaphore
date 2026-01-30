@@ -94,7 +94,7 @@
           server {
               listen 80;
               server_name {{ server_name }};
-              
+
               root {{ phpipam_install_dir }};
               index index.php;
 
@@ -104,13 +104,15 @@
 
               location ~ \.php$ {
                   include snippets/fastcgi-php.conf;
-                  fastcgi_pass unix:/run/php/php{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}-fpm.sock;
+                  fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
               }
 
               location ~ /\.ht {
                   deny all;
               }
           }
+      notify: Restart Nginx
+
 
     - name: Enable phpIPAM site
       ansible.builtin.file:
@@ -131,5 +133,5 @@
 
     - name: Restart PHP-FPM
       ansible.builtin.service:
-        name: "php{{ ansible_facts.packages.php[0].version | regex_search('^([0-9]+\\.[0-9]+)') }}-fpm"
+        name: "php{{ php_version }}-fpm"
         state: restarted
