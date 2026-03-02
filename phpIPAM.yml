@@ -62,12 +62,13 @@
         mysql -u {{ phpipam_db_user }} -p'{{ phpipam_db_password }}' {{ phpipam_db_name }} < {{ phpipam_install_dir }}/db/SCHEMA.sql
       args:
         creates: /var/lib/mysql/{{ phpipam_db_name }}/settings.ibd
-        - name: Clone phpIPAM repository
-          ansible.builtin.git:
-            repo: 'https://github.com/phpipam/phpipam.git'
-            dest: '{{ phpipam_install_dir }}'
-            version: '1.7'  # specific release
-            recursive: yes
+        
+    - name: Clone phpIPAM repository
+      ansible.builtin.git:
+        repo: 'https://github.com/phpipam/phpipam.git'
+        dest: '{{ phpipam_install_dir }}'
+        version: '1.7'  # specific release
+        recursive: yes
 
     - name: Create phpIPAM config.php from config.dist.php
       ansible.builtin.copy:
