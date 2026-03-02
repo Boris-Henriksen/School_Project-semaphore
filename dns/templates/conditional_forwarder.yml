@@ -1,8 +1,0 @@
-zone "heldigekartofler.local" {
-    type forward;
-    forward only;
-    forwarders {
-        10.10.10.8;
-        10.10.10.7;
-    };
-};
