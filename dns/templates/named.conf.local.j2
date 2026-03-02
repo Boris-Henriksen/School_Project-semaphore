@@ -13,3 +13,12 @@ zone "{{ rz.zone_name }}" {
     allow-transfer { 10.20.10.112; };  # Slave IP
 };
 {% endfor %}
+
+zone "heldigekartofler.local" {
+    type forward;
+    forward only;
+    forwarders {
+        10.10.10.8;
+        10.10.10.7;
+    };
+};
