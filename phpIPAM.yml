@@ -56,12 +56,6 @@
     - name: Create phpIPAM database user
       ansible.builtin.command: >
         mysql -uroot -p'{{ mysql_root_password }}' -e "CREATE USER IF NOT EXISTS '{{ phpipam_db_user }}'@'localhost' IDENTIFIED BY '{{ phpipam_db_password }}'; GRANT ALL PRIVILEGES ON {{ phpipam_db_name }}.* TO '{{ phpipam_db_user }}'@'localhost'; FLUSH PRIVILEGES;"
-
-    - name: Import phpIPAM database schema
-      ansible.builtin.shell: >
-        mysql -u {{ phpipam_db_user }} -p'{{ phpipam_db_password }}' {{ phpipam_db_name }} < {{ phpipam_install_dir }}/db/SCHEMA.sql
-      args:
-        creates: /var/lib/mysql/{{ phpipam_db_name }}/settings.ibd
         
     - name: Clone phpIPAM repository
       ansible.builtin.git:
@@ -69,6 +63,12 @@
         dest: '{{ phpipam_install_dir }}'
         version: '1.7'  # specific release
         recursive: yes
+
+    - name: Import phpIPAM database schema
+      ansible.builtin.shell: >
+        mysql -u {{ phpipam_db_user }} -p'{{ phpipam_db_password }}' {{ phpipam_db_name }} < {{ phpipam_install_dir }}/db/SCHEMA.sql
+      args:
+        creates: /var/lib/mysql/{{ phpipam_db_name }}/settings.ibd
 
     - name: Create phpIPAM config.php from config.dist.php
       ansible.builtin.copy:
