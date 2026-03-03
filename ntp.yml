@@ -1,3 +1,4 @@
+---
 - name: Configure NTP server
   hosts: NTP
   become: yes
@@ -9,6 +10,7 @@
       - dk.pool.ntp.org
 
   tasks:
+
     - name: Ensure apt cache is updated
       apt:
         update_cache: yes
@@ -52,10 +54,14 @@
           {% endfor %}
         marker: "# {mark} ANSIBLE ALLOW NETWORKS"
 
-    - name: Restart chrony if config changed
+    - name: Restart chrony to apply config
       systemd:
         name: chrony
         state: restarted
+
+    - name: Force immediate time sync
+      command: chronyc makestep
+      become: yes
 
     - name: Open NTP port in UFW
       ufw:
