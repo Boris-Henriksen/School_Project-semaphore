@@ -1,6 +1,6 @@
 ---
-- name: NTP
-  hosts: ntp_servers
+- name: Configure NTP Server
+  hosts: NTP
   become: yes
 
   vars:
