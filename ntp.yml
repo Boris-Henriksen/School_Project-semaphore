@@ -1,5 +1,4 @@
----
-- name: Configure NTP Server
+- name: Configure NTP server
   hosts: NTP
   become: yes
 
@@ -10,31 +9,35 @@
       - dk.pool.ntp.org
 
   tasks:
+    - name: Ensure apt cache is updated
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
 
     - name: Install chrony
       apt:
         name: chrony
         state: present
         update_cache: yes
+        force_apt_get: yes
 
-    - name: Disable systemd-timesyncd
+    - name: Ensure chrony service is enabled and running
       systemd:
-        name: systemd-timesyncd
-        enabled: no
-        state: stopped
-      ignore_errors: yes
+        name: chrony
+        enabled: yes
+        state: started
+        daemon_reload: yes
 
-    - name: Remove existing pool/server lines
+    - name: Remove old pool/server lines
       lineinfile:
         path: /etc/chrony/chrony.conf
         regexp: '^(pool|server) '
         state: absent
 
-    - name: Add upstream NTP pools
+    - name: Add DK pool
       blockinfile:
         path: /etc/chrony/chrony.conf
         block: |
-          # Upstream NTP pools
           {% for pool in ntp_pools %}
           pool {{ pool }} iburst
           {% endfor %}
@@ -49,10 +52,9 @@
           {% endfor %}
         marker: "# {mark} ANSIBLE ALLOW NETWORKS"
 
-    - name: Ensure chrony is enabled and running
+    - name: Restart chrony if config changed
       systemd:
         name: chrony
-        enabled: yes
         state: restarted
 
     - name: Open NTP port in UFW
