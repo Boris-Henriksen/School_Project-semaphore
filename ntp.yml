@@ -1,0 +1,64 @@
+---
+- name: Configure NTP server
+  hosts: ntp_servers
+  become: yes
+
+  vars:
+    ntp_allowed_networks:
+      - 10.20.0.0/16
+    ntp_pools:
+      - dk.pool.ntp.org
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+
+  tasks:
+
+    - name: Install chrony
+      apt:
+        name: chrony
+        state: present
+        update_cache: yes
+
+    - name: Disable systemd-timesyncd
+      systemd:
+        name: systemd-timesyncd
+        enabled: no
+        state: stopped
+      ignore_errors: yes
+
+    - name: Remove existing pool/server lines
+      lineinfile:
+        path: /etc/chrony/chrony.conf
+        regexp: '^(pool|server) '
+        state: absent
+
+    - name: Add upstream NTP pools
+      blockinfile:
+        path: /etc/chrony/chrony.conf
+        block: |
+          # Upstream NTP pools
+          {% for pool in ntp_pools %}
+          pool {{ pool }} iburst
+          {% endfor %}
+        marker: "# {mark} ANSIBLE NTP POOLS"
+
+    - name: Allow internal networks
+      blockinfile:
+        path: /etc/chrony/chrony.conf
+        block: |
+          {% for net in ntp_allowed_networks %}
+          allow {{ net }}
+          {% endfor %}
+        marker: "# {mark} ANSIBLE ALLOW NETWORKS"
+
+    - name: Ensure chrony is enabled and running
+      systemd:
+        name: chrony
+        enabled: yes
+        state: restarted
+
+    - name: Open NTP port in UFW
+      ufw:
+        rule: allow
+        port: 123
+        proto: udp
