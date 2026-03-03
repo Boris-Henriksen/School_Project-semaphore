@@ -1,5 +1,5 @@
 ---
-- name: Configure NTP server
+- name: NTP
   hosts: ntp_servers
   become: yes
 
