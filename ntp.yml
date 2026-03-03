@@ -8,8 +8,6 @@
       - 10.20.0.0/16
     ntp_pools:
       - dk.pool.ntp.org
-      - 0.pool.ntp.org
-      - 1.pool.ntp.org
 
   tasks:
 
