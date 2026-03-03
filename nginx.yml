@@ -2,7 +2,8 @@
 - hosts: web_servers
   become: true
   tasks:
-    - name: Install nginx
-      ansible.builtin.package:
+    - name: Update apt cache and install nginx
+      ansible.builtin.apt:      # Brug 'apt' modulet direkte for bedre kontrol
         name: nginx
         state: present
+        update_cache: yes      # Dette svarer til 'apt-get update'
