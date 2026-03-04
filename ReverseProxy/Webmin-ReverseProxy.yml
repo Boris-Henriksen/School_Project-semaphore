@@ -1,112 +1,145 @@
 ---
-- name: Setup Webmin behind NGINX Reverse Proxy
+- name: Setup Webmin Reverse Proxy with SSL
   hosts: reverseproxy
   become: yes
   gather_facts: yes
 
   vars:
     ssl_dir: /etc/nginx/ssl
-    lab_root_ca_path: /opt/lab-ca/certs/rootCA.crt
-    webmin_url: "https://prdownloads.sourceforge.net/webadmin/webmin-current.deb"
-    webmin_tmp: /tmp/webmin.deb
+    temp_rootca: /tmp/rootCA.crt
+    temp_webmin: /tmp/webmin-latest.deb
+    lab_root_ca_path: /opt/lab-ca/certs/rootCA.crt   # on CA server
+    webmin_fqdn: webmin.dk-prod.lan
+    webmin_port: 10000
 
   tasks:
 
     - name: Install prerequisites
       apt:
         name:
+          - nginx
           - wget
-          - apt-transport-https
-          - lsb-release
+          - curl
+          - jq
           - ca-certificates
-          - gnupg
-          - unzip
         state: present
         update_cache: yes
 
-    - name: Download latest Webmin .deb
-      get_url:
-        url: "{{ webmin_url }}"
-        dest: "{{ webmin_tmp }}"
-        mode: '0755'
-
-    - name: Install Webmin
-      apt:
-        deb: "{{ webmin_tmp }}"
-
-    - name: Disable Webmin SSL (NGINX handles SSL)
-      lineinfile:
-        path: /etc/webmin/miniserv.conf
-        regexp: '^ssl='
-        line: 'ssl=0'
-      notify: Restart Webmin
-
-    - name: Ensure SSL directory exists
-      file:
-        path: "{{ ssl_dir }}"
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
-
-    - name: Fetch Lab Root CA from CA server to /tmp
+    - name: Fetch Lab Root CA from CA server
       fetch:
         src: "{{ lab_root_ca_path }}"
-        dest: "/tmp/rootCA.crt"
+        dest: "{{ temp_rootca }}"
         flat: yes
       delegate_to: ca-openssl
 
-    - name: Copy Lab Root CA to reverse proxy SSL directory
+    - name: Copy Lab Root CA into SSL directory
       copy:
-        src: "/tmp/rootCA.crt"
+        src: "{{ temp_rootca }}"
         dest: "{{ ssl_dir }}/rootCA.crt"
         owner: root
         group: root
         mode: '0644'
 
-    - name: Configure NGINX for Webmin reverse proxy
-      block:
-        - name: Install NGINX
-          apt:
-            name: nginx
-            state: present
-            update_cache: yes
+    - name: Update system trust for Root CA
+      copy:
+        src: "{{ ssl_dir }}/rootCA.crt"
+        dest: /usr/local/share/ca-certificates/rootCA.crt
+      notify:
+        - Update CA Trust
 
-        - name: Create NGINX Webmin config
-          copy:
-            dest: /etc/nginx/sites-available/webmin.conf
-            content: |
-              server {
-                  listen 443 ssl;
-                  server_name webmin.dk-prod.lan;
+    - name: Get latest Webmin download link via GitHub API
+      vars:
+        gh_api: "https://api.github.com/repos/webmin/webmin/releases/latest"
+      uri:
+        url: "{{ gh_api }}"
+        return_content: yes
+      register: webmin_api
 
-                  ssl_certificate {{ ssl_dir }}/rootCA.crt;
-                  ssl_certificate_key {{ ssl_dir }}/rootCA.crt;
+    - name: Set latest Webmin .deb URL
+      set_fact:
+        webmin_download_url: >
+          {{ webmin_api.json.assets | selectattr("name", "search", "_all.deb$") | map(attribute="browser_download_url") | list | first }}
 
-                  location / {
-                      proxy_pass http://127.0.0.1:10000/;
-                      proxy_set_header Host $host;
-                      proxy_set_header X-Real-IP $remote_addr;
-                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                      proxy_set_header X-Forwarded-Proto $scheme;
-                  }
+    - name: Validate Webmin download URL
+      fail:
+        msg: "Could not determine the latest Webmin .deb URL from GitHub releases!"
+      when: webmin_download_url is not defined
+
+    - name: Download latest Webmin .deb
+      get_url:
+        url: "{{ webmin_download_url }}"
+        dest: "{{ temp_webmin }}"
+        mode: '0644'
+
+    - name: Install Webmin
+      apt:
+        deb: "{{ temp_webmin }}"
+      notify:
+        - Restart Webmin
+
+    - name: Disable internal Webmin SSL
+      lineinfile:
+        path: /etc/webmin/miniserv.conf
+        regexp: '^ssl='
+        line: 'ssl=0'
+      notify:
+        - Restart Webmin
+
+    - name: Ensure SSL directory exists
+      file:
+        path: "{{ ssl_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create NGINX site config
+      copy:
+        dest: /etc/nginx/sites-available/webmin.conf
+        content: |
+          server {
+              listen 443 ssl;
+              server_name {{ webmin_fqdn }};
+
+              ssl_certificate {{ ssl_dir }}/rootCA.crt;
+              ssl_certificate_key {{ ssl_dir }}/rootCA.crt;
+
+              location / {
+                  proxy_pass http://127.0.0.1:{{ webmin_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
               }
-          notify: Reload NGINX
+          }
+      notify:
+        - Test and Reload NGINX
 
-        - name: Enable NGINX site
-          file:
-            src: /etc/nginx/sites-available/webmin.conf
-            dest: /etc/nginx/sites-enabled/webmin.conf
-            state: link
-          notify: Reload NGINX
+    - name: Enable Webmin site
+      file:
+        src: /etc/nginx/sites-available/webmin.conf
+        dest: /etc/nginx/sites-enabled/webmin.conf
+        state: link
+      notify:
+        - Test and Reload NGINX
 
   handlers:
-    - name: Reload NGINX
-      service:
-        name: nginx
-        state: reloaded
+
+    - name: Test and Reload NGINX
+      block:
+        - name: Test NGINX config
+          command: nginx -t
+          register: nginx_test
+          ignore_errors: yes
+
+        - name: Reload NGINX if valid
+          service:
+            name: nginx
+            state: reloaded
+          when: nginx_test.rc == 0
 
     - name: Restart Webmin
       service:
         name: webmin
         state: restarted
+
+    - name: Update CA Trust
+      command: update-ca-certificates
