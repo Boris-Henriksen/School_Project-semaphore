@@ -1,19 +1,15 @@
 server {
     listen 443 ssl;
-    server_name {{ webmin_common_name }};
+    server_name {{ item.fqdn }};
 
-    ssl_certificate {{ webmin_cert_path }};
-    ssl_certificate_key {{ webmin_key_path }};
+    ssl_certificate     {{ ssl_dir }}/rootCA.crt;
+    ssl_certificate_key {{ ssl_dir }}/rootCA.crt;
 
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-{% for backend in backend_servers %}
-    location /{{ backend.name }}/ {
-        proxy_pass http://{{ backend.host }}:{{ backend.port }}/;
+    location / {
+        proxy_pass http://{{ item.backend_host }}:{{ item.backend_port }};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
-{% endfor %}
 }
