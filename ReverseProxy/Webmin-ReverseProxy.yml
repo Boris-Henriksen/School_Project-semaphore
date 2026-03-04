@@ -60,13 +60,13 @@
         organization_name: dk-prod.lan
 
     - name: Sign reverse proxy certificate with Lab Root CA
-      community.crypto.openssl_certificate:
+      community.crypto.x509_certificate:
         path: "{{ webmin_cert_path }}"
         csr_path: "{{ webmin_csr_path }}"
         provider: ownca
         ownca_path: "{{ ssl_dir }}/rootCA.crt"
         ownca_privatekey_path: "{{ ssl_dir }}/rootCA.key"
-        ownca_not_after: 20360101
+        not_after: 2036-01-01T00:00:00
 
     - name: Copy Root CA to system trust store
       copy:
