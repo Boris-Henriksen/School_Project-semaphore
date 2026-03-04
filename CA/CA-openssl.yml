@@ -1,6 +1,6 @@
 ---
 - name: Setup Lab Root CA Automatically
-  hosts: CA-openssl  # Replace with your CA host in Semaphore if needed
+  hosts: CA-openssl  # Replace with your CA host in Semaphore
   become: yes
   gather_facts: yes
 
@@ -30,23 +30,18 @@
         - newcerts
         - crl
 
-    - name: Ensure CA serial file exists
-      file:
-        path: "{{ ca_dir }}/serial"
-        state: touch
-        mode: '0644'
-
-    - name: Set initial serial value
+    - name: Ensure CA serial file exists and initialize it
       lineinfile:
         path: "{{ ca_dir }}/serial"
         line: '1000'
+        create: yes
+        mode: '0644'
 
-    - name: Initialize CA serial
-      copy:
-        content: '1000'
-        dest: "{{ ca_dir }}/serial"
-      args:
-        creates: "{{ ca_dir }}/serial"
+    - name: Ensure CA database file exists
+      file:
+        path: "{{ ca_dir }}/index.txt"
+        state: touch
+        mode: '0644'
 
     - name: Deploy OpenSSL config
       copy:
