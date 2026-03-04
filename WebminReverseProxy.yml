@@ -1,0 +1,67 @@
+---
+- name: Install Webmin + NGINX Reverse Proxy
+  hosts: proxy
+  become: yes
+  vars:
+    freepbx_host: 10.0.0.15
+    freepbx_port: 8088
+    proxy_domain: pbx.dk-prod.lan
+
+  tasks:
+    - name: Install dependencies
+      apt:
+        name:
+          - wget
+          - gnupg
+          - apt-transport-https
+          - software-properties-common
+        state: present
+        update_cache: yes
+
+    - name: Add Webmin repository key
+      apt_key:
+        url: http://www.webmin.com/jcameron-key.asc
+        state: present
+
+    - name: Add Webmin repository
+      apt_repository:
+        repo: "deb http://download.webmin.com/download/repository sarge contrib"
+        state: present
+
+    - name: Install Webmin
+      apt:
+        name: webmin
+        state: present
+        update_cache: yes
+
+    - name: Install NGINX
+      apt:
+        name: nginx
+        state: present
+
+    - name: Ensure NGINX is running
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Deploy reverse proxy for FreePBX
+      template:
+        src: nginx-freepbx.j2
+        dest: /etc/nginx/sites-available/{{ proxy_domain }}
+      notify:
+        - Reload NGINX
+
+    - name: Enable site
+      file:
+        src: /etc/nginx/sites-available/{{ proxy_domain }}
+        dest: /etc/nginx/sites-enabled/{{ proxy_domain }}
+        state: link
+      notify:
+        - Reload NGINX
+
+  handlers:
+    - name: Reload NGINX
+      service:
+        name: nginx
+        state: reloaded
