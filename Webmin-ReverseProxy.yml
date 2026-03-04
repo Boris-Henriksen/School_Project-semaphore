@@ -42,10 +42,11 @@
         dest: /tmp/webmin-setup-repo.sh
         mode: '0755'
 
-    - name: Run Webmin setup script (non-interactive)
-      shell: sh /tmp/webmin-setup-repo.sh
-      args:
-        creates: /etc/webmin/miniserv.conf
+    - name: Run Webmin setup script non-interactive
+      shell: |
+        DEBIAN_FRONTEND=noninteractive sh /tmp/webmin-setup-repo.sh
+      environment:
+        DEBIAN_FRONTEND: noninteractive
 
     - name: Install Webmin
       apt:
