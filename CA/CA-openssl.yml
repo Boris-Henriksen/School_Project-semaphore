@@ -31,11 +31,10 @@
         - crl
 
     - name: Initialize CA database
-      copy:
-        content: ''
-        dest: "{{ ca_dir }}/index.txt"
-      args:
-        creates: "{{ ca_dir }}/index.txt"
+      file:
+        path: "{{ ca_dir }}/index.txt"
+        state: touch
+        mode: '0644'
 
     - name: Initialize CA serial
       copy:
