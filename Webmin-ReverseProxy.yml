@@ -5,7 +5,7 @@
   gather_facts: yes
 
   vars:
-    # Path to Lab Root CA on CA server or already copied to reverse proxy
+    # Path to Lab Root CA on reverse proxy (or copied from CA server)
     ca_cert_src: "/opt/lab-ca/certs/rootCA.crt"
     ca_cert_dest: "/etc/nginx/ssl/rootCA.crt"
     ssl_dir: /etc/nginx/ssl
@@ -62,32 +62,33 @@
         group: root
         mode: '0644'
 
-    - name: Generate SSL key, CSR, and sign with Lab Root CA for each host
-      block:
-        - name: Generate private key for {{ item.hostname }}
-          command: "openssl genrsa -out {{ ssl_dir }}/{{ item.hostname }}.key 2048"
-          args:
-            creates: "{{ ssl_dir }}/{{ item.hostname }}.key"
+    # Generate SSL for each backend host
+    - name: Generate private keys
+      command: "openssl genrsa -out {{ ssl_dir }}/{{ item.hostname }}.key 2048"
+      args:
+        creates: "{{ ssl_dir }}/{{ item.hostname }}.key"
+      loop: "{{ reverse_proxies }}"
 
-        - name: Generate CSR for {{ item.hostname }}
-          command: >
-            openssl req -new -key {{ ssl_dir }}/{{ item.hostname }}.key
-            -out {{ ssl_dir }}/{{ item.hostname }}.csr
-            -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ item.hostname }}"
-          args:
-            creates: "{{ ssl_dir }}/{{ item.hostname }}.csr"
+    - name: Generate CSRs
+      command: >
+        openssl req -new -key {{ ssl_dir }}/{{ item.hostname }}.key
+        -out {{ ssl_dir }}/{{ item.hostname }}.csr
+        -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ item.hostname }}"
+      args:
+        creates: "{{ ssl_dir }}/{{ item.hostname }}.csr"
+      loop: "{{ reverse_proxies }}"
 
-        - name: Sign SSL certificate for {{ item.hostname }} with Lab Root CA
-          command: >
-            openssl x509 -req
-            -in {{ ssl_dir }}/{{ item.hostname }}.csr
-            -CA {{ ca_cert_dest }}
-            -CAkey /opt/lab-ca/private/rootCA.key
-            -CAcreateserial
-            -out {{ ssl_dir }}/{{ item.hostname }}.crt
-            -days 825 -sha256
-          args:
-            creates: "{{ ssl_dir }}/{{ item.hostname }}.crt"
+    - name: Sign SSL certificates with Lab Root CA
+      command: >
+        openssl x509 -req
+        -in {{ ssl_dir }}/{{ item.hostname }}.csr
+        -CA {{ ca_cert_dest }}
+        -CAkey /opt/lab-ca/private/rootCA.key
+        -CAcreateserial
+        -out {{ ssl_dir }}/{{ item.hostname }}.crt
+        -days 825 -sha256
+      args:
+        creates: "{{ ssl_dir }}/{{ item.hostname }}.crt"
       loop: "{{ reverse_proxies }}"
 
     - name: Deploy NGINX site configurations
