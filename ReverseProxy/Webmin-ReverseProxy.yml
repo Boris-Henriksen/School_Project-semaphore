@@ -1,37 +1,69 @@
 ---
-- name: Setup NGINX Reverse Proxy with SSL
+- name: Setup Webmin with Nginx reverse proxy and Lab Root CA
   hosts: reverseproxy
   become: yes
+  gather_facts: yes
+
   vars:
     ssl_dir: /etc/nginx/ssl
-    backend_servers:
-      - name: webmin
-        host: 10.20.10.115
-        port: 10000
-      - name: graylog
-        host: 10.20.10.120
-        port: 9000
-    root_ca_remote_path: /opt/lab-ca/certs/rootCA.crt
-    root_ca_local_path: "{{ ssl_dir }}/rootCA.crt"
-    webmin_csr_path: "{{ ssl_dir }}/webmin.csr"
-    webmin_key_path: "{{ ssl_dir }}/webmin.key"
-    webmin_cert_path: "{{ ssl_dir }}/webmin.crt"
-    webmin_common_name: webmin.dk-prod.lan
+    webmin_fqdn: webmin.dk-prod.lan
+    webmin_deb_path: /tmp/webmin-latest.deb
+    root_ca_path_remote: /opt/lab-ca/certs/rootCA.crt
+    root_ca_path_local: /tmp/rootCA.crt
+
+  pre_tasks:
+    - name: Ensure python3-venv and pip are installed
+      apt:
+        name:
+          - python3-venv
+          - python3-pip
+        state: present
+        update_cache: yes
+
+    - name: Create Python virtual environment for Ansible modules
+      command: python3 -m venv /opt/ansible-venv
+      args:
+        creates: /opt/ansible-venv
+
+    - name: Install community.crypto collection in venv
+      command: /opt/ansible-venv/bin/ansible-galaxy collection install community.crypto --force
+
   tasks:
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
 
     - name: Install prerequisites
       apt:
         name:
-          - nginx
-          - python3-pip
-          - unzip
+          - wget
+          - apt-transport-https
+          - curl
+          - lsb-release
         state: present
         update_cache: yes
 
-    - name: Install community.crypto collection
-      ansible.builtin.pip:
-        name: "ansible-collection-community.crypto"
-        executable: pip3
+    - name: Download latest Webmin .deb dynamically
+      get_url:
+        url: https://www.webmin.com/download/webmin-current.deb
+        dest: "{{ webmin_deb_path }}"
+        mode: '0644'
+
+    - name: Install Webmin
+      apt:
+        deb: "{{ webmin_deb_path }}"
+        state: present
+
+    - name: Disable Webmin SSL (Nginx handles SSL)
+      lineinfile:
+        path: /etc/webmin/miniserv.conf
+        regexp: '^ssl='
+        line: 'ssl=0'
+        create: yes
+      notify:
+        - Restart Webmin
 
     - name: Create SSL directory
       file:
@@ -41,59 +73,80 @@
 
     - name: Fetch Lab Root CA from CA server
       fetch:
-        src: "{{ root_ca_remote_path }}"
-        dest: "{{ root_ca_local_path }}"
+        src: "{{ root_ca_path_remote }}"
+        dest: "{{ root_ca_path_local }}"
         flat: yes
       delegate_to: ca-openssl
 
-    - name: Generate reverse proxy private key
-      community.crypto.openssl_privatekey:
-        path: "{{ webmin_key_path }}"
-        size: 4096
-
-    - name: Generate reverse proxy CSR
-      community.crypto.openssl_csr:
-        path: "{{ webmin_csr_path }}"
-        privatekey_path: "{{ webmin_key_path }}"
-        common_name: "{{ webmin_common_name }}"
-        country_name: DK
-        organization_name: dk-prod.lan
-
-    - name: Sign reverse proxy certificate with Lab Root CA
-      community.crypto.x509_certificate:
-        path: "{{ webmin_cert_path }}"
-        csr_path: "{{ webmin_csr_path }}"
-        provider: ownca
-        ownca_path: "{{ ssl_dir }}/rootCA.crt"
-        ownca_privatekey_path: "{{ ssl_dir }}/rootCA.key"
-        not_after: 2036-01-01T00:00:00
-
-    - name: Copy Root CA to system trust store
+    - name: Copy Lab Root CA to reverse proxy trust store
       copy:
-        src: "{{ ssl_dir }}/rootCA.crt"
+        src: "{{ root_ca_path_local }}"
         dest: /usr/local/share/ca-certificates/rootCA.crt
-        owner: root
-        group: root
         mode: '0644'
 
-    - name: Update CA certificates
+    - name: Update trust store
       command: update-ca-certificates
 
-    - name: Deploy NGINX reverse proxy configuration
-      template:
-        src: reverseproxy.conf.j2
-        dest: /etc/nginx/sites-available/reverseproxy.conf
+    - name: Generate Webmin SSL key
+      openssl_privatekey:
+        path: "{{ ssl_dir }}/webmin.key"
+        size: 4096
 
-    - name: Enable NGINX site
+    - name: Generate Webmin CSR
+      community.crypto.openssl_csr:
+        path: "{{ ssl_dir }}/webmin.csr"
+        privatekey_path: "{{ ssl_dir }}/webmin.key"
+        common_name: "{{ webmin_fqdn }}"
+        country_name: DK
+        state_or_province_name: Denmark
+        organization_name: dk-prod.lan
+
+    - name: Sign Webmin certificate with Lab Root CA
+      community.crypto.x509_certificate:
+        path: "{{ ssl_dir }}/webmin.crt"
+        csr_path: "{{ ssl_dir }}/webmin.csr"
+        provider: ownca
+        ownca_path: /usr/local/share/ca-certificates/rootCA.crt
+        ownca_privatekey_path: "{{ ssl_dir }}/webmin.key"
+        not_after: 2036-01-01T00:00:00
+
+    - name: Configure Nginx site for Webmin
+      copy:
+        dest: /etc/nginx/sites-available/webmin
+        content: |
+          server {
+              listen 443 ssl;
+              server_name {{ webmin_fqdn }};
+
+              ssl_certificate {{ ssl_dir }}/webmin.crt;
+              ssl_certificate_key {{ ssl_dir }}/webmin.key;
+
+              location / {
+                  proxy_pass http://127.0.0.1:10000;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+      notify:
+        - Reload Nginx
+
+    - name: Enable Webmin site
       file:
-        src: /etc/nginx/sites-available/reverseproxy.conf
-        dest: /etc/nginx/sites-enabled/reverseproxy.conf
+        src: /etc/nginx/sites-available/webmin
+        dest: /etc/nginx/sites-enabled/webmin
         state: link
+      notify:
+        - Reload Nginx
 
-    - name: Test NGINX configuration
-      command: nginx -t
-
-    - name: Reload NGINX
+  handlers:
+    - name: Reload Nginx
       service:
         name: nginx
         state: reloaded
+
+    - name: Restart Webmin
+      service:
+        name: webmin
+        state: restarted
