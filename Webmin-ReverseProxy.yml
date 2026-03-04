@@ -5,7 +5,7 @@
   gather_facts: yes
 
   vars:
-    # Path to Lab Root CA on reverse proxy (or copied from CA server)
+    # Path to Lab Root CA on reverse proxy (copied from CA server)
     ca_cert_src: "/opt/lab-ca/certs/rootCA.crt"
     ca_cert_dest: "/etc/nginx/ssl/rootCA.crt"
     ssl_dir: /etc/nginx/ssl
@@ -27,37 +27,42 @@
         name:
           - nginx
           - wget
+          - curl
           - apt-transport-https
           - software-properties-common
         state: present
         update_cache: yes
 
-    - name: Add Webmin GPG key
-      apt_key:
-        url: http://www.webmin.com/jcameron-key.asc
-        state: present
+    # ----------------------------
+    # Webmin installation
+    # ----------------------------
+    - name: Download Webmin setup script
+      get_url:
+        url: https://raw.githubusercontent.com/webmin/webmin/master/webmin-setup-repo.sh
+        dest: /tmp/webmin-setup-repo.sh
+        mode: '0755'
 
-    - name: Add Webmin repository
-      apt_repository:
-        repo: "deb http://download.webmin.com/download/repository sarge contrib"
-        state: present
-
-    - name: Update apt cache
-      apt:
-        update_cache: yes
+    - name: Run Webmin setup script (non-interactive)
+      shell: sh /tmp/webmin-setup-repo.sh
+      args:
+        creates: /etc/webmin/miniserv.conf
 
     - name: Install Webmin
       apt:
         name: webmin
         state: present
+        update_cache: yes
 
-    - name: Disable Webmin SSL (we use NGINX)
+    - name: Disable Webmin SSL (we use NGINX SSL)
       lineinfile:
         path: /etc/webmin/miniserv.conf
         regexp: '^ssl='
         line: 'ssl=0'
       notify: Restart Webmin
 
+    # ----------------------------
+    # NGINX SSL setup
+    # ----------------------------
     - name: Create SSL directory
       file:
         path: "{{ ssl_dir }}"
@@ -72,7 +77,6 @@
         group: root
         mode: '0644'
 
-    # Generate SSL for each backend host
     - name: Generate private keys
       command: "openssl genrsa -out {{ ssl_dir }}/{{ item.hostname }}.key 2048"
       args:
@@ -101,6 +105,9 @@
         creates: "{{ ssl_dir }}/{{ item.hostname }}.crt"
       loop: "{{ reverse_proxies }}"
 
+    # ----------------------------
+    # NGINX reverse proxy configuration
+    # ----------------------------
     - name: Deploy NGINX site configurations
       copy:
         dest: "/etc/nginx/sites-available/{{ item.hostname }}"
