@@ -1,19 +1,16 @@
 ---
-- name: Setup Lab Root CA and Reverse Proxy Certificate
-  hosts: localhost  # Replace with your CA server host in Semaphore
+- name: Setup Lab Root CA
+  hosts: localhost  # Replace with your CA server host in Semaphore later
   become: yes
   gather_facts: yes
 
   vars:
     ca_dir: /opt/lab-ca
     root_ca_name: rootCA
-    proxy_cert_name: proxy
     country: DK
     state: Denmark
-    organization: LabCA
-    proxy_domain: pbx.dk-prod.lan
+    organization: dk-prod.lan
     root_ca_validity_days: 3650
-    proxy_cert_validity_days: 825
 
   tasks:
     - name: Install OpenSSL
@@ -78,36 +75,6 @@
         group: root
         mode: '0600'
 
-    - name: Generate Reverse Proxy private key
-      command: >
-        openssl genrsa -out {{ ca_dir }}/private/{{ proxy_cert_name }}.key 2048
-      args:
-        creates: "{{ ca_dir }}/private/{{ proxy_cert_name }}.key"
-
-    - name: Generate Reverse Proxy CSR
-      command: >
-        openssl req -new
-        -config {{ ca_dir }}/openssl.cnf
-        -key {{ ca_dir }}/private/{{ proxy_cert_name }}.key
-        -out {{ ca_dir }}/{{ proxy_cert_name }}.csr
-        -subj "/C={{ country }}/ST={{ state }}/O={{ organization }}/CN={{ proxy_domain }}"
-      args:
-        creates: "{{ ca_dir }}/{{ proxy_cert_name }}.csr"
-
-    - name: Sign Reverse Proxy certificate with Root CA
-      command: >
-        openssl x509 -req -in {{ ca_dir }}/{{ proxy_cert_name }}.csr
-        -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
-        -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
-        -CAcreateserial
-        -out {{ ca_dir }}/certs/{{ proxy_cert_name }}.crt
-        -days {{ proxy_cert_validity_days }}
-        -sha256
-        -extensions v3_server
-        -extfile {{ ca_dir }}/openssl.cnf
-      args:
-        creates: "{{ ca_dir }}/certs/{{ proxy_cert_name }}.crt"
-
     - name: Display completion message
       debug:
-        msg: "Lab Root CA and Reverse Proxy certificate generated in {{ ca_dir }}"
+        msg: "Lab Root CA generated in {{ ca_dir }} – ready to sign certificates in the future"
