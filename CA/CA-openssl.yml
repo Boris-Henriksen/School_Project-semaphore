@@ -30,11 +30,16 @@
         - newcerts
         - crl
 
-    - name: Initialize CA database
+    - name: Ensure CA serial file exists
       file:
-        path: "{{ ca_dir }}/index.txt"
+        path: "{{ ca_dir }}/serial"
         state: touch
         mode: '0644'
+
+    - name: Set initial serial value
+      lineinfile:
+        path: "{{ ca_dir }}/serial"
+        line: '1000'
 
     - name: Initialize CA serial
       copy:
