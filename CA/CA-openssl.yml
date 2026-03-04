@@ -1,6 +1,6 @@
 ---
-- name: Setup Lab Root CA
-  hosts: localhost  # Replace with your CA server host in Semaphore later
+- name: Setup Lab Root CA Automatically
+  hosts: localhost  # Replace with your CA host in Semaphore if needed
   become: yes
   gather_facts: yes
 
@@ -30,22 +30,40 @@
         - newcerts
         - crl
 
-    - name: Initialize CA files
+    - name: Initialize CA database
       copy:
         content: ''
         dest: "{{ ca_dir }}/index.txt"
       args:
         creates: "{{ ca_dir }}/index.txt"
 
-    - copy:
+    - name: Initialize CA serial
+      copy:
         content: '1000'
         dest: "{{ ca_dir }}/serial"
       args:
         creates: "{{ ca_dir }}/serial"
 
-    - name: Deploy OpenSSL config template
-      template:
-        src: openssl.cnf.j2
+    - name: Deploy OpenSSL config
+      copy:
+        content: |
+          [ req ]
+          default_bits       = 4096
+          default_md         = sha256
+          prompt             = no
+          distinguished_name = req_distinguished_name
+
+          [ req_distinguished_name ]
+          C  = {{ country }}
+          ST = {{ state }}
+          O  = {{ organization }}
+          CN = Lab Root CA
+
+          [ v3_ca ]
+          subjectKeyIdentifier = hash
+          authorityKeyIdentifier = keyid:always,issuer
+          basicConstraints = critical, CA:true
+          keyUsage = critical, digitalSignature, cRLSign, keyCertSign
         dest: "{{ ca_dir }}/openssl.cnf"
         owner: root
         group: root
@@ -64,17 +82,16 @@
         -key {{ ca_dir }}/private/{{ root_ca_name }}.key
         -sha256 -days {{ root_ca_validity_days }}
         -out {{ ca_dir }}/certs/{{ root_ca_name }}.crt
-        -subj "/C={{ country }}/ST={{ state }}/O={{ organization }}/CN=Lab Root CA"
       args:
         creates: "{{ ca_dir }}/certs/{{ root_ca_name }}.crt"
 
-    - name: Secure Root CA key
+    - name: Secure Root CA private key
       file:
         path: "{{ ca_dir }}/private/{{ root_ca_name }}.key"
         owner: root
         group: root
         mode: '0600'
 
-    - name: Display completion message
+    - name: Show completion message
       debug:
-        msg: "Lab Root CA generated in {{ ca_dir }} – ready to sign certificates in the future"
+        msg: "Lab Root CA generated in {{ ca_dir }} – ready to sign certificates later."
