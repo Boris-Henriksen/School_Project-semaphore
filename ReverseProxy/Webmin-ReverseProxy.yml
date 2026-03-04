@@ -1,79 +1,94 @@
 ---
-- name: Setup NGINX Reverse Proxy for Lab Web Services
-  hosts: reverse-proxy
+- name: Setup NGINX Reverse Proxy with SSL
+  hosts: reverseproxy
   become: yes
-  gather_facts: yes
-
   vars:
     ssl_dir: /etc/nginx/ssl
-    ca_cert_path: /opt/lab-ca/certs/rootCA.crt
-    ca_key_path: /opt/lab-ca/private/rootCA.key
-    reverse_proxy_domain: webmin.dk-prod.lan
     backend_servers:
       - name: webmin
         host: 10.20.10.115
-        port: 10000   # Webmin default
+        port: 10000
       - name: graylog
         host: 10.20.10.120
-        port: 9000    # Graylog web UI
-
+        port: 9000
+    root_ca_remote_path: /opt/lab-ca/certs/rootCA.crt
+    root_ca_local_path: "{{ ssl_dir }}/rootCA.crt"
+    webmin_csr_path: "{{ ssl_dir }}/webmin.csr"
+    webmin_key_path: "{{ ssl_dir }}/webmin.key"
+    webmin_cert_path: "{{ ssl_dir }}/webmin.crt"
+    webmin_common_name: webmin.dk-prod.lan
   tasks:
 
     - name: Install prerequisites
       apt:
         name:
           - nginx
-          - openssl
+          - python3-pip
+          - unzip
         state: present
         update_cache: yes
+
+    - name: Install community.crypto collection
+      ansible.builtin.pip:
+        name: "ansible-collection-community.crypto"
+        executable: pip3
 
     - name: Create SSL directory
       file:
         path: "{{ ssl_dir }}"
         state: directory
-        owner: root
-        group: root
         mode: '0755'
 
-    - name: Generate Reverse Proxy private key
-      openssl_privatekey:
-        path: "{{ ssl_dir }}/{{ reverse_proxy_domain }}.key"
+    - name: Fetch Lab Root CA from CA server
+      fetch:
+        src: "{{ root_ca_remote_path }}"
+        dest: "{{ root_ca_local_path }}"
+        flat: yes
+      delegate_to: ca-openssl
+
+    - name: Generate reverse proxy private key
+      community.crypto.openssl_privatekey:
+        path: "{{ webmin_key_path }}"
         size: 4096
-        state: present
 
-    - name: Generate Reverse Proxy self-signed certificate using Lab Root CA
-      openssl_certificate:
-        path: "{{ ssl_dir }}/{{ reverse_proxy_domain }}.crt"
-        privatekey_path: "{{ ssl_dir }}/{{ reverse_proxy_domain }}.key"
-        csr_path: "{{ ssl_dir }}/{{ reverse_proxy_domain }}.csr"
-        provider: selfsigned
-        subject:
-          common_name: "{{ reverse_proxy_domain }}"
-          organization_name: "dk-prod.lan"
-          country_name: "DK"
-        ownca_path: "{{ ca_cert_path }}"
-        ownca_privatekey_path: "{{ ca_key_path }}"
-        days: 825
-      # This creates a certificate signed by your lab root CA
+    - name: Generate reverse proxy CSR
+      community.crypto.openssl_csr:
+        path: "{{ webmin_csr_path }}"
+        privatekey_path: "{{ webmin_key_path }}"
+        common_name: "{{ webmin_common_name }}"
+        country_name: DK
+        organization_name: dk-prod.lan
 
-    - name: Deploy NGINX reverse proxy configuration
-      template:
-        src: reverseproxy.conf.j2
-        dest: /etc/nginx/sites-available/{{ reverse_proxy_domain }}
+    - name: Sign reverse proxy certificate with Lab Root CA
+      community.crypto.openssl_certificate:
+        path: "{{ webmin_cert_path }}"
+        csr_path: "{{ webmin_csr_path }}"
+        provider: ownca
+        ownca_path: "{{ ssl_dir }}/rootCA.crt"
+        ownca_privatekey_path: "{{ ssl_dir }}/rootCA.key"
+        ownca_not_after: 20360101
+
+    - name: Copy Root CA to system trust store
+      copy:
+        src: "{{ ssl_dir }}/rootCA.crt"
+        dest: /usr/local/share/ca-certificates/rootCA.crt
         owner: root
         group: root
         mode: '0644'
 
-    - name: Enable reverse proxy site
-      file:
-        src: /etc/nginx/sites-available/{{ reverse_proxy_domain }}
-        dest: /etc/nginx/sites-enabled/{{ reverse_proxy_domain }}
-        state: link
+    - name: Update CA certificates
+      command: update-ca-certificates
 
-    - name: Remove default NGINX site
+    - name: Deploy NGINX reverse proxy configuration
+      template:
+        src: reverseproxy.conf.j2
+        dest: /etc/nginx/sites-available/reverseproxy.conf
+
+    - name: Enable NGINX site
       file:
-        path: /etc/nginx/sites-enabled/default
-        state: absent
+        src: /etc/nginx/sites-available/reverseproxy.conf
+        dest: /etc/nginx/sites-enabled/reverseproxy.conf
+        state: link
 
     - name: Test NGINX configuration
       command: nginx -t
