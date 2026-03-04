@@ -32,14 +32,24 @@
         state: present
         update_cache: yes
 
+    - name: Add Webmin GPG key
+      apt_key:
+        url: http://www.webmin.com/jcameron-key.asc
+        state: present
+
+    - name: Add Webmin repository
+      apt_repository:
+        repo: "deb http://download.webmin.com/download/repository sarge contrib"
+        state: present
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
     - name: Install Webmin
-      shell: |
-        wget -q -O- http://www.webmin.com/jcameron-key.asc | apt-key add -
-        add-apt-repository "deb http://download.webmin.com/download/repository sarge contrib"
-        apt update
-        apt install -y webmin
-      args:
-        creates: /etc/webmin
+      apt:
+        name: webmin
+        state: present
 
     - name: Disable Webmin SSL (we use NGINX)
       lineinfile:
