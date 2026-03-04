@@ -1,1 +1,113 @@
+---
+- name: Setup Lab Root CA and Reverse Proxy Certificate
+  hosts: localhost  # Replace with your CA server host in Semaphore
+  become: yes
+  gather_facts: yes
 
+  vars:
+    ca_dir: /opt/lab-ca
+    root_ca_name: rootCA
+    proxy_cert_name: proxy
+    country: DK
+    state: Denmark
+    organization: LabCA
+    proxy_domain: pbx.dk-prod.lan
+    root_ca_validity_days: 3650
+    proxy_cert_validity_days: 825
+
+  tasks:
+    - name: Install OpenSSL
+      apt:
+        name: openssl
+        state: present
+        update_cache: yes
+
+    - name: Create CA directories
+      file:
+        path: "{{ ca_dir }}/{{ item }}"
+        state: directory
+        mode: 0755
+      loop:
+        - certs
+        - private
+        - newcerts
+        - crl
+
+    - name: Initialize CA files
+      copy:
+        content: ''
+        dest: "{{ ca_dir }}/index.txt"
+      args:
+        creates: "{{ ca_dir }}/index.txt"
+
+    - copy:
+        content: '1000'
+        dest: "{{ ca_dir }}/serial"
+      args:
+        creates: "{{ ca_dir }}/serial"
+
+    - name: Deploy OpenSSL config template
+      template:
+        src: openssl.cnf.j2
+        dest: "{{ ca_dir }}/openssl.cnf"
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Generate Root CA private key
+      command: >
+        openssl genrsa -out {{ ca_dir }}/private/{{ root_ca_name }}.key 4096
+      args:
+        creates: "{{ ca_dir }}/private/{{ root_ca_name }}.key"
+
+    - name: Generate Root CA self-signed certificate
+      command: >
+        openssl req -x509 -new -nodes
+        -config {{ ca_dir }}/openssl.cnf
+        -key {{ ca_dir }}/private/{{ root_ca_name }}.key
+        -sha256 -days {{ root_ca_validity_days }}
+        -out {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+        -subj "/C={{ country }}/ST={{ state }}/O={{ organization }}/CN=Lab Root CA"
+      args:
+        creates: "{{ ca_dir }}/certs/{{ root_ca_name }}.crt"
+
+    - name: Secure Root CA key
+      file:
+        path: "{{ ca_dir }}/private/{{ root_ca_name }}.key"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Generate Reverse Proxy private key
+      command: >
+        openssl genrsa -out {{ ca_dir }}/private/{{ proxy_cert_name }}.key 2048
+      args:
+        creates: "{{ ca_dir }}/private/{{ proxy_cert_name }}.key"
+
+    - name: Generate Reverse Proxy CSR
+      command: >
+        openssl req -new
+        -config {{ ca_dir }}/openssl.cnf
+        -key {{ ca_dir }}/private/{{ proxy_cert_name }}.key
+        -out {{ ca_dir }}/{{ proxy_cert_name }}.csr
+        -subj "/C={{ country }}/ST={{ state }}/O={{ organization }}/CN={{ proxy_domain }}"
+      args:
+        creates: "{{ ca_dir }}/{{ proxy_cert_name }}.csr"
+
+    - name: Sign Reverse Proxy certificate with Root CA
+      command: >
+        openssl x509 -req -in {{ ca_dir }}/{{ proxy_cert_name }}.csr
+        -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+        -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
+        -CAcreateserial
+        -out {{ ca_dir }}/certs/{{ proxy_cert_name }}.crt
+        -days {{ proxy_cert_validity_days }}
+        -sha256
+        -extensions v3_server
+        -extfile {{ ca_dir }}/openssl.cnf
+      args:
+        creates: "{{ ca_dir }}/certs/{{ proxy_cert_name }}.crt"
+
+    - name: Display completion message
+      debug:
+        msg: "Lab Root CA and Reverse Proxy certificate generated in {{ ca_dir }}"
