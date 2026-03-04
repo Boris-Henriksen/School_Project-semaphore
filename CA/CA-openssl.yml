@@ -1,6 +1,6 @@
 ---
 - name: Setup Lab Root CA Automatically
-  hosts: localhost  # Replace with your CA host in Semaphore if needed
+  hosts: CA-openssl  # Replace with your CA host in Semaphore if needed
   become: yes
   gather_facts: yes
 
