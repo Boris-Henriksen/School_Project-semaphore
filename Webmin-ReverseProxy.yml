@@ -8,7 +8,7 @@
     webmin_hostname: webmin.dk-prod.lan
     ssl_dir: /etc/nginx/ssl
 
-    # CA server inventory name
+    # Inventory name of your CA server
     ca_server: CA-openssl
 
     # Paths on CA server
@@ -24,17 +24,33 @@
     apt:
       name:
         - nginx
-        - wget
+        - curl
+        - jq
         - openssl
       state: present
       update_cache: yes
 
   # ------------------------------------------------
-  # Install latest stable Webmin (dynamic)
+  # Get latest Webmin release from GitHub API
   # ------------------------------------------------
-  - name: Download latest stable Webmin
+  - name: Get latest Webmin .deb download URL
+    shell: |
+      curl -s https://api.github.com/repos/webmin/webmin/releases/latest \
+      | jq -r '.assets[] | select(.name | test("_all.deb$")) | .browser_download_url'
+    register: webmin_download_url
+    changed_when: false
+
+  - name: Fail if Webmin URL not found
+    fail:
+      msg: "Could not determine latest Webmin .deb URL"
+    when: webmin_download_url.stdout == ""
+
+  # ------------------------------------------------
+  # Download & Install Webmin
+  # ------------------------------------------------
+  - name: Download latest Webmin
     get_url:
-      url: https://www.webmin.com/download/webmin-current.deb
+      url: "{{ webmin_download_url.stdout }}"
       dest: /tmp/webmin.deb
       mode: '0644'
 
@@ -42,7 +58,7 @@
     apt:
       deb: /tmp/webmin.deb
 
-  - name: Disable Webmin SSL (NGINX will handle SSL)
+  - name: Disable Webmin SSL (NGINX handles SSL)
     lineinfile:
       path: /etc/webmin/miniserv.conf
       regexp: '^ssl='
@@ -103,7 +119,7 @@
       mode: '0600'
 
   # ------------------------------------------------
-  # NGINX Reverse Proxy Config
+  # NGINX Reverse Proxy Configuration
   # ------------------------------------------------
   - name: Create NGINX config for Webmin
     copy:
@@ -138,7 +154,6 @@
       path: /etc/nginx/sites-enabled/default
       state: absent
     notify: Reload NGINX
-
 
   handlers:
     - name: Reload NGINX
