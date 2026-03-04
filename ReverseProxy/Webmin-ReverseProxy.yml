@@ -1,39 +1,24 @@
 ---
-- name: Setup Reverse Proxy with Webmin SSL using Lab Root CA
+- name: Setup Webmin Reverse Proxy with SSL
   hosts: reverseproxy
-  become: yes
-  gather_facts: yes
+  become: true
+  gather_facts: true
 
   vars:
-    # Paths
     ssl_dir: /etc/nginx/ssl
-    nginx_sites_dir: /etc/nginx/sites-available
-    nginx_sites_enabled: /etc/nginx/sites-enabled
-
-    # CA info
-    ca_server: 10.20.10.102
-    root_ca_remote_path: /opt/lab-ca/certs/rootCA.crt
-    root_ca_local_path: /usr/local/share/ca-certificates/rootCA.crt
-
-    # Proxy info
-    web_services:
-      - name: webmin
-        backend_host: 10.20.10.120
-        backend_port: 10000
-        fqdn: webmin.dk-prod.lan
-      - name: graylog
-        backend_host: 10.20.10.121
-        backend_port: 9000
-        fqdn: graylog.dk-prod.lan
+    webmin_host: webmin.dk-prod.lan
+    lab_root_ca_path: /opt/lab-ca/certs/rootCA.crt  # on CA server
+    webmin_port: 10000
 
   tasks:
 
-    - name: Install required packages
+    - name: Install prerequisites
       apt:
         name:
           - nginx
-          - webmin
-          - openssl
+          - wget
+          - unzip
+          - gnupg
           - ca-certificates
         state: present
         update_cache: yes
@@ -46,48 +31,83 @@
 
     - name: Fetch Lab Root CA from CA server
       fetch:
-        src: "{{ root_ca_remote_path }}"
-        dest: "/tmp/rootCA.crt"
+        src: "{{ lab_root_ca_path }}"
+        dest: "{{ ssl_dir }}/rootCA.crt"
         flat: yes
-      delegate_to: "{{ ca_server }}"
+      delegate_to: ca-openssl
 
-    - name: Copy Root CA to system trust store
+    - name: Trust Lab Root CA locally (for the reverse proxy)
       copy:
-        src: "/tmp/rootCA.crt"
-        dest: "{{ root_ca_local_path }}"
-        owner: root
-        group: root
+        src: "{{ ssl_dir }}/rootCA.crt"
+        dest: /usr/local/share/ca-certificates/rootCA.crt
         mode: '0644'
-
     - name: Update CA certificates
       command: update-ca-certificates
 
-    - name: Configure Nginx reverse proxy for web services
-      block:
-        - name: Create Nginx site config
-          template:
-            src: nginx_reverseproxy.j2
-            dest: "{{ nginx_sites_dir }}/{{ item.name }}"
-            owner: root
-            group: root
-            mode: '0644'
-          loop: "{{ web_services }}"
-          loop_control:
-            label: "{{ item.name }}"
+    - name: Download latest stable Webmin .deb
+      get_url:
+        url: https://prdownloads.sourceforge.net/webadmin/webmin-current.deb
+        dest: /tmp/webmin.deb
+        mode: '0644'
 
-        - name: Enable Nginx sites
-          file:
-            src: "{{ nginx_sites_dir }}/{{ item.name }}"
-            dest: "{{ nginx_sites_enabled }}/{{ item.name }}"
-            state: link
-          loop: "{{ web_services }}"
-          loop_control:
-            label: "{{ item.name }}"
+    - name: Install Webmin
+      apt:
+        deb: /tmp/webmin.deb
+        state: present
 
-      notify: Reload Nginx
+    - name: Disable Webmin internal SSL (we use Nginx)
+      lineinfile:
+        path: /etc/webmin/miniserv.conf
+        regexp: '^ssl='
+        line: 'ssl=0'
+      notify: Restart Webmin
+
+    - name: Configure Nginx reverse proxy for Webmin
+      blockinfile:
+        path: /etc/nginx/sites-available/webmin.conf
+        create: yes
+        block: |
+          server {
+              listen 443 ssl;
+              server_name {{ webmin_host }};
+
+              ssl_certificate {{ ssl_dir }}/rootCA.crt;
+              ssl_certificate_key {{ ssl_dir }}/rootCA.crt;
+
+              location / {
+                  proxy_pass http://127.0.0.1:{{ webmin_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+      notify:
+        - Test and Reload Nginx
+
+    - name: Enable Nginx site
+      file:
+        src: /etc/nginx/sites-available/webmin.conf
+        dest: /etc/nginx/sites-enabled/webmin.conf
+        state: link
+      notify:
+        - Test and Reload Nginx
 
   handlers:
-    - name: Reload Nginx
+    - name: Test and Reload Nginx
+      block:
+        - name: Test Nginx configuration
+          command: nginx -t
+          register: nginx_test
+          ignore_errors: yes
+
+        - name: Reload Nginx if config valid
+          service:
+            name: nginx
+            state: reloaded
+          when: nginx_test.rc == 0
+
+    - name: Restart Webmin
       service:
-        name: nginx
-        state: reloaded
+        name: webmin
+        state: restarted
