@@ -1,95 +1,152 @@
 ---
-- name: Setup Webmin on Reverse Proxy with SSL
+- name: Setup Webmin Reverse Proxy with Lab Root CA
   hosts: reverse-proxy
   become: yes
   gather_facts: yes
 
   vars:
+    webmin_hostname: webmin.dk-prod.lan
     ssl_dir: /etc/nginx/ssl
-    webmin_host: webmin.dk-prod.lan
-    ca_server: CA-openssl          # Your CA VM host/group
+
+    # CA server inventory name
+    ca_server: CA-openssl
+
+    # Paths on CA server
     ca_cert_path: /opt/lab-ca/certs/rootCA.crt
     ca_key_path: /opt/lab-ca/private/rootCA.key
-    webmin_ssl_key: "{{ ssl_dir }}/webmin.key"
-    webmin_ssl_crt: "{{ ssl_dir }}/webmin.crt"
-    webmin_ssl_csr: "{{ ssl_dir }}/webmin.csr"
 
   tasks:
-    - name: Install prerequisites
-      apt:
-        name: "{{ item }}"
-        state: present
-        update_cache: yes
-      loop:
+
+  # ------------------------------------------------
+  # Install required packages
+  # ------------------------------------------------
+  - name: Install required packages
+    apt:
+      name:
+        - nginx
         - wget
-        - perl
-        - apt-transport-https
-        - gnupg
-        - lsb-release
+        - openssl
+      state: present
+      update_cache: yes
 
-    - name: Ensure SSL directory exists
-      file:
-        path: "{{ ssl_dir }}"
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
+  # ------------------------------------------------
+  # Install latest stable Webmin (dynamic)
+  # ------------------------------------------------
+  - name: Download latest stable Webmin
+    get_url:
+      url: https://www.webmin.com/download/webmin-current.deb
+      dest: /tmp/webmin.deb
+      mode: '0644'
 
-    - name: Get latest Webmin .deb filename dynamically
-      shell: >
-        wget -qO- https://sourceforge.net/projects/webadmin/files/webmin/
-        | grep -Po 'webmin_\d+\.\d+_all\.deb' | sort -V | tail -1
-      register: webmin_latest
+  - name: Install Webmin
+    apt:
+      deb: /tmp/webmin.deb
 
-    - name: Download latest Webmin .deb
-      get_url:
-        url: "https://prdownloads.sourceforge.net/webadmin/{{ webmin_latest.stdout }}"
-        dest: /tmp/webmin.deb
-        mode: '0644'
+  - name: Disable Webmin SSL (NGINX will handle SSL)
+    lineinfile:
+      path: /etc/webmin/miniserv.conf
+      regexp: '^ssl='
+      line: 'ssl=0'
+    notify: Restart Webmin
 
-    - name: Install Webmin
-      apt:
-        deb: /tmp/webmin.deb
+  # ------------------------------------------------
+  # SSL Setup
+  # ------------------------------------------------
+  - name: Create SSL directory
+    file:
+      path: "{{ ssl_dir }}"
+      state: directory
+      owner: root
+      group: root
+      mode: '0755'
 
-    - name: Copy Lab Root CA directly from CA server
-      copy:
-        src: "{{ ca_cert_path }}"
-        dest: "{{ ssl_dir }}/rootCA.crt"
-        owner: root
-        group: root
-        mode: '0644'
-      delegate_to: "{{ ca_server }}"
+  - name: Copy Root CA from CA server
+    copy:
+      src: "{{ ca_cert_path }}"
+      dest: "{{ ssl_dir }}/rootCA.crt"
+      owner: root
+      group: root
+      mode: '0644'
+    delegate_to: "{{ ca_server }}"
 
-    - name: Generate Webmin private key
-      command: >
-        openssl genrsa -out {{ webmin_ssl_key }} 4096
-      args:
-        creates: "{{ webmin_ssl_key }}"
+  - name: Generate private key
+    command: openssl genrsa -out {{ ssl_dir }}/webmin.key 4096
+    args:
+      creates: "{{ ssl_dir }}/webmin.key"
 
-    - name: Generate Webmin CSR
-      command: >
-        openssl req -new -key {{ webmin_ssl_key }}
-        -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ webmin_host }}"
-        -out {{ webmin_ssl_csr }}
-      args:
-        creates: "{{ webmin_ssl_csr }}"
+  - name: Generate CSR
+    command: >
+      openssl req -new
+      -key {{ ssl_dir }}/webmin.key
+      -out {{ ssl_dir }}/webmin.csr
+      -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ webmin_hostname }}"
+    args:
+      creates: "{{ ssl_dir }}/webmin.csr"
 
-    - name: Sign Webmin certificate with Lab Root CA (from CA server)
-      command: >
-        openssl x509 -req -in {{ webmin_ssl_csr }}
-        -CA {{ ca_cert_path }} -CAkey {{ ca_key_path }} -CAcreateserial
-        -out {{ webmin_ssl_crt }} -days 365 -sha256
-      args:
-        creates: "{{ webmin_ssl_crt }}"
-      delegate_to: "{{ ca_server }}"
+  - name: Sign certificate on CA server
+    command: >
+      openssl x509 -req
+      -in {{ ssl_dir }}/webmin.csr
+      -CA {{ ca_cert_path }}
+      -CAkey {{ ca_key_path }}
+      -CAcreateserial
+      -out {{ ssl_dir }}/webmin.crt
+      -days 825
+      -sha256
+    args:
+      creates: "{{ ssl_dir }}/webmin.crt"
+    delegate_to: "{{ ca_server }}"
 
-    - name: Secure Webmin private key
-      file:
-        path: "{{ webmin_ssl_key }}"
-        owner: root
-        group: root
-        mode: '0600'
+  - name: Secure private key
+    file:
+      path: "{{ ssl_dir }}/webmin.key"
+      mode: '0600'
 
-    - name: Completion message
-      debug:
-        msg: "Webmin installed on {{ inventory_hostname }} with SSL ready at {{ webmin_host }}"
+  # ------------------------------------------------
+  # NGINX Reverse Proxy Config
+  # ------------------------------------------------
+  - name: Create NGINX config for Webmin
+    copy:
+      dest: /etc/nginx/sites-available/webmin
+      content: |
+        server {
+            listen 443 ssl;
+            server_name {{ webmin_hostname }};
+
+            ssl_certificate {{ ssl_dir }}/webmin.crt;
+            ssl_certificate_key {{ ssl_dir }}/webmin.key;
+
+            location / {
+                proxy_pass http://127.0.0.1:10000/;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+        }
+    notify: Reload NGINX
+
+  - name: Enable Webmin site
+    file:
+      src: /etc/nginx/sites-available/webmin
+      dest: /etc/nginx/sites-enabled/webmin
+      state: link
+    notify: Reload NGINX
+
+  - name: Remove default NGINX site
+    file:
+      path: /etc/nginx/sites-enabled/default
+      state: absent
+    notify: Reload NGINX
+
+
+  handlers:
+    - name: Reload NGINX
+      service:
+        name: nginx
+        state: reloaded
+
+    - name: Restart Webmin
+      service:
+        name: webmin
+        state: restarted
