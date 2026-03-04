@@ -44,9 +44,8 @@
 
     - name: Run Webmin setup script non-interactive
       shell: |
-        DEBIAN_FRONTEND=noninteractive sh /tmp/webmin-setup-repo.sh
-      environment:
-        DEBIAN_FRONTEND: noninteractive
+        export DEBIAN_FRONTEND=noninteractive
+        yes | sh /tmp/webmin-setup-repo.sh
 
     - name: Install Webmin
       apt:
