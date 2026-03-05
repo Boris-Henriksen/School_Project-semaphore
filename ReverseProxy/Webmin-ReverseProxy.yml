@@ -58,121 +58,90 @@
       mode: '0700'
 
   #################################################
-  # Generate Keys, CSR, and Certificates
+  # Loop Over Backend Servers
   #################################################
+  - name: Deploy SSL certs and NGINX config per backend
+    block:
 
-  - name: Generate private key for all backends
-    command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
-    args:
-      creates: "{{ ssl_dir }}/{{ item.name }}.key"
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+      - name: Generate private key
+        command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
+        args:
+          creates: "{{ ssl_dir }}/{{ item.name }}.key"
 
-  - name: Generate CSR with SAN for all backends
-    command: >
-      openssl req -new
-      -key {{ ssl_dir }}/{{ item.name }}.key
-      -out {{ ssl_dir }}/{{ item.name }}.csr
-      -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ item.name }}.dk-prod.lan"
-      -addext "subjectAltName=DNS:{{ item.name }}.dk-prod.lan"
-    args:
-      creates: "{{ ssl_dir }}/{{ item.name }}.csr"
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+      - name: Generate CSR with SAN
+        command: >
+          openssl req -new
+          -key {{ ssl_dir }}/{{ item.name }}.key
+          -out {{ ssl_dir }}/{{ item.name }}.csr
+          -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ item.name }}.dk-prod.lan"
+          -addext "subjectAltName=DNS:{{ item.name }}.dk-prod.lan"
+        args:
+          creates: "{{ ssl_dir }}/{{ item.name }}.csr"
 
-  - name: Read CSR from reverse proxy
-    slurp:
-      src: "{{ ssl_dir }}/{{ item.name }}.csr"
-    register: csr_files
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+      - name: Copy CSR to CA server
+        copy:
+          src: "{{ ssl_dir }}/{{ item.name }}.csr"
+          dest: "{{ ca_dir }}/{{ item.name }}.csr"
+        delegate_to: "{{ ca_host }}"
 
-  - name: Write CSR to CA server
-    copy:
-      content: "{{ csr_files.results[loop.index0].content | b64decode }}"
-      dest: "{{ ca_dir }}/{{ item.name }}.csr"
-    delegate_to: "{{ ca_host }}"
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+      - name: Sign CSR on CA server
+        command: >
+          openssl x509 -req
+          -in {{ ca_dir }}/{{ item.name }}.csr
+          -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+          -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
+          -CAcreateserial
+          -out {{ ca_dir }}/{{ item.name }}.crt
+          -days 825
+          -sha256
+          -copy_extensions copy
+        delegate_to: "{{ ca_host }}"
+        args:
+          creates: "{{ ca_dir }}/{{ item.name }}.crt"
 
-  - name: Sign certificate using root CA
-    command: >
-      openssl x509 -req
-      -in {{ ca_dir }}/{{ item.name }}.csr
-      -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
-      -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
-      -CAcreateserial
-      -out {{ ca_dir }}/{{ item.name }}.crt
-      -days 825
-      -sha256
-      -copy_extensions copy
-    delegate_to: "{{ ca_host }}"
-    args:
-      creates: "{{ ca_dir }}/{{ item.name }}.crt"
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+      - name: Copy signed certificate back to reverse proxy
+        copy:
+          src: "{{ ca_dir }}/{{ item.name }}.crt"
+          dest: "{{ ssl_dir }}/{{ item.name }}.crt"
+          mode: '0600'
+        delegate_to: "{{ ca_host }}"
 
-  - name: Read signed certificate from CA
-    slurp:
-      src: "{{ ca_dir }}/{{ item.name }}.crt"
-    delegate_to: "{{ ca_host }}"
-    register: signed_certs
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+      - name: Configure NGINX reverse proxy
+        copy:
+          dest: /etc/nginx/sites-available/{{ item.name }}
+          content: |
+            server {
+                listen 443 ssl;
+                server_name {{ item.name }}.dk-prod.lan;
 
-  - name: Install signed certificate on reverse proxy
-    copy:
-      content: "{{ signed_certs.results[loop.index0].content | b64decode }}"
-      dest: "{{ ssl_dir }}/{{ item.name }}.crt"
-      mode: '0600'
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+                ssl_certificate {{ ssl_dir }}/{{ item.name }}.crt;
+                ssl_certificate_key {{ ssl_dir }}/{{ item.name }}.key;
 
-  #################################################
-  # Configure NGINX
-  #################################################
-  - name: Configure NGINX reverse proxy for all backends
-    copy:
-      dest: /etc/nginx/sites-available/{{ item.name }}
-      content: |
-        server {
-            listen 443 ssl;
-            server_name {{ item.name }}.dk-prod.lan;
+                ssl_protocols TLSv1.2 TLSv1.3;
+                ssl_prefer_server_ciphers on;
 
-            ssl_certificate {{ ssl_dir }}/{{ item.name }}.crt;
-            ssl_certificate_key {{ ssl_dir }}/{{ item.name }}.key;
-
-            ssl_protocols TLSv1.2 TLSv1.3;
-            ssl_prefer_server_ciphers on;
-
-            location / {
-                proxy_pass http://{{ item.ip }}:{{ backend_port }};
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                location / {
+                    proxy_pass http://{{ item.ip }}:{{ backend_port }};
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                }
             }
-        }
+
+      - name: Enable NGINX site
+        file:
+          src: /etc/nginx/sites-available/{{ item.name }}
+          dest: /etc/nginx/sites-enabled/{{ item.name }}
+          state: link
+          force: yes
+
     loop: "{{ backend_servers }}"
     loop_control:
       label: "{{ item.name }}"
 
-  - name: Enable NGINX site for all backends
-    file:
-      src: /etc/nginx/sites-available/{{ item.name }}
-      dest: /etc/nginx/sites-enabled/{{ item.name }}
-      state: link
-      force: yes
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
-
+  #################################################
+  # Restart NGINX
+  #################################################
   - name: Restart NGINX
     service:
       name: nginx
