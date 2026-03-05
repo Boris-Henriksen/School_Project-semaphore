@@ -58,49 +58,44 @@
       mode: '0700'
 
   #################################################
-  # Generate Private Keys
+  # Generate Private Key, CSR Config, and CSR per backend
   #################################################
-  - name: Generate private key per backend
-    command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
-    args:
-      creates: "{{ ssl_dir }}/{{ item.name }}.key"
-    loop: "{{ backend_servers }}"
+  - name: Generate private key, OpenSSL config, and CSR
+    block:
+      - name: Generate private key
+        command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
+        args:
+          creates: "{{ ssl_dir }}/{{ item.name }}.key"
 
-  #################################################
-  # Generate CSR with SAN
-  #################################################
-  - name: Create temporary OpenSSL config for SAN
-    copy:
-      dest: "{{ ssl_dir }}/{{ item.name }}_openssl.cnf"
-      content: |
-        [req]
-        default_bits = 4096
-        prompt = no
-        default_md = sha256
-        distinguished_name = dn
-        req_extensions = v3_req
+      - name: Create temporary OpenSSL config for SAN
+        copy:
+          dest: "{{ ssl_dir }}/{{ item.name }}_openssl.cnf"
+          content: |
+            [req]
+            default_bits = 4096
+            prompt = no
+            default_md = sha256
+            distinguished_name = dn
+            req_extensions = v3_req
 
-        [dn]
-        C = DK
-        ST = Denmark
-        O = dk-prod.lan
-        CN = {{ item.name }}.dk-prod.lan
+            [dn]
+            C = DK
+            ST = Denmark
+            O = dk-prod.lan
+            CN = {{ item.name }}.dk-prod.lan
 
-        [v3_req]
-        subjectAltName = @alt_names
+            [v3_req]
+            subjectAltName = @alt_names
 
-        [alt_names]
-        DNS.1 = {{ item.name }}.dk-prod.lan
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
+            [alt_names]
+            DNS.1 = {{ item.name }}.dk-prod.lan
 
-  - name: Generate CSR using OpenSSL config
-    command: >
-      openssl req -new
-      -key {{ ssl_dir }}/{{ item.name }}.key
-      -out {{ ssl_dir }}/{{ item.name }}.csr
-      -config {{ ssl_dir }}/{{ item.name }}_openssl.cnf
+      - name: Generate CSR using OpenSSL config
+        command: >
+          openssl req -new
+          -key {{ ssl_dir }}/{{ item.name }}.key
+          -out {{ ssl_dir }}/{{ item.name }}.csr
+          -config {{ ssl_dir }}/{{ item.name }}_openssl.cnf
     loop: "{{ backend_servers }}"
     loop_control:
       label: "{{ item.name }}"
