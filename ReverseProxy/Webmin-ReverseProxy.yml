@@ -1,177 +1,110 @@
----
-- name: Deploy Reverse Proxy with SSL for Multiple Backends
-  hosts: reverseproxy
-  become: yes
-  gather_facts: yes
+#################################################
+# Generate private key
+#################################################
+- name: Generate private key
+  command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
+  args:
+    creates: "{{ ssl_dir }}/{{ item.name }}.key"
+  loop: "{{ backend_servers }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-  vars:
-    ca_host: 10.20.10.102
-    ca_dir: /opt/lab-ca
-    ssl_dir: /etc/nginx/ssl
-    root_ca_name: rootCA
-    backend_port: 80  # Default backend port
-    backend_servers:
-      - name: proxmox-node1
-        ip: 10.20.10.11
-      - name: proxmox-node2
-        ip: 10.20.10.12
-      - name: proxmox-node3
-        ip: 10.20.10.13
-      - name: zabbix
-        ip: 10.20.10.101
-      - name: ipam
-        ip: 10.20.10.103
-      - name: pbx
-        ip: 10.20.10.113
-      - name: log
-        ip: 10.20.10.109
-      - name: webmin
-        ip: 10.20.10.115
-      - name: web
-        ip: 10.20.10.110
-      - name: semaphore
-        ip: 10.20.10.28
+#################################################
+# Generate CSR
+#################################################
+- name: Generate CSR with SAN
+  command: >
+    openssl req -new
+    -key {{ ssl_dir }}/{{ item.name }}.key
+    -out {{ ssl_dir }}/{{ item.name }}.csr
+    -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ item.name }}.dk-prod.lan"
+    -addext "subjectAltName=DNS:{{ item.name }}.dk-prod.lan"
+  args:
+    creates: "{{ ssl_dir }}/{{ item.name }}.csr"
+  loop: "{{ backend_servers }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-  tasks:
+#################################################
+# Copy CSR to CA
+#################################################
+- name: Copy CSR to CA server
+  copy:
+    src: "{{ ssl_dir }}/{{ item.name }}.csr"
+    dest: "{{ ca_dir }}/{{ item.name }}.csr"
+  delegate_to: "{{ ca_host }}"
+  loop: "{{ backend_servers }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-  #################################################
-  # Install Required Packages
-  #################################################
-  - name: Install required packages
-    apt:
-      name:
-        - nginx
-        - openssl
-        - ca-certificates
-        - wget
-        - perl
-      state: present
-      update_cache: yes
+#################################################
+# Sign certificate on CA
+#################################################
+- name: Sign CSR on CA server
+  command: >
+    openssl x509 -req
+    -in {{ ca_dir }}/{{ item.name }}.csr
+    -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+    -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
+    -CAcreateserial
+    -out {{ ca_dir }}/{{ item.name }}.crt
+    -days 825
+    -sha256
+    -copy_extensions copy
+  delegate_to: "{{ ca_host }}"
+  args:
+    creates: "{{ ca_dir }}/{{ item.name }}.crt"
+  loop: "{{ backend_servers }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-  #################################################
-  # Create SSL Directory
-  #################################################
-  - name: Create SSL directory
-    file:
-      path: "{{ ssl_dir }}"
-      state: directory
-      mode: '0700'
+#################################################
+# Copy certificate back to reverse proxy
+#################################################
+- name: Copy signed certificate back
+  copy:
+    src: "{{ ca_dir }}/{{ item.name }}.crt"
+    dest: "{{ ssl_dir }}/{{ item.name }}.crt"
+    mode: '0600'
+  delegate_to: "{{ ca_host }}"
+  loop: "{{ backend_servers }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-  #################################################
-  # Loop Over Backend Servers
-  #################################################
-  - name: Deploy SSL certs and NGINX config per backend
-    block:
+#################################################
+# Configure NGINX per backend
+#################################################
+- name: Configure NGINX reverse proxy
+  copy:
+    dest: /etc/nginx/sites-available/{{ item.name }}
+    content: |
+      server {
+          listen 443 ssl;
+          server_name {{ item.name }}.dk-prod.lan;
 
-      - name: Generate private key
-        command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
-        args:
-          creates: "{{ ssl_dir }}/{{ item.name }}.key"
+          ssl_certificate {{ ssl_dir }}/{{ item.name }}.crt;
+          ssl_certificate_key {{ ssl_dir }}/{{ item.name }}.key;
 
-      - name: Generate CSR with SAN
-        command: >
-          openssl req -new
-          -key {{ ssl_dir }}/{{ item.name }}.key
-          -out {{ ssl_dir }}/{{ item.name }}.csr
-          -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ item.name }}.dk-prod.lan"
-          -addext "subjectAltName=DNS:{{ item.name }}.dk-prod.lan"
-        args:
-          creates: "{{ ssl_dir }}/{{ item.name }}.csr"
+          ssl_protocols TLSv1.2 TLSv1.3;
+          ssl_prefer_server_ciphers on;
 
-      - name: Copy CSR to CA server
-        copy:
-          src: "{{ ssl_dir }}/{{ item.name }}.csr"
-          dest: "{{ ca_dir }}/{{ item.name }}.csr"
-        delegate_to: "{{ ca_host }}"
+          location / {
+              proxy_pass http://{{ item.ip }}:{{ backend_port }};
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          }
+      }
+  loop: "{{ backend_servers }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-      - name: Sign CSR on CA server
-        command: >
-          openssl x509 -req
-          -in {{ ca_dir }}/{{ item.name }}.csr
-          -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
-          -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
-          -CAcreateserial
-          -out {{ ca_dir }}/{{ item.name }}.crt
-          -days 825
-          -sha256
-          -copy_extensions copy
-        delegate_to: "{{ ca_host }}"
-        args:
-          creates: "{{ ca_dir }}/{{ item.name }}.crt"
-
-      - name: Copy signed certificate back to reverse proxy
-        copy:
-          src: "{{ ca_dir }}/{{ item.name }}.crt"
-          dest: "{{ ssl_dir }}/{{ item.name }}.crt"
-          mode: '0600'
-        delegate_to: "{{ ca_host }}"
-
-      - name: Configure NGINX reverse proxy
-        copy:
-          dest: /etc/nginx/sites-available/{{ item.name }}
-          content: |
-            server {
-                listen 443 ssl;
-                server_name {{ item.name }}.dk-prod.lan;
-
-                ssl_certificate {{ ssl_dir }}/{{ item.name }}.crt;
-                ssl_certificate_key {{ ssl_dir }}/{{ item.name }}.key;
-
-                ssl_protocols TLSv1.2 TLSv1.3;
-                ssl_prefer_server_ciphers on;
-
-                location / {
-                    proxy_pass http://{{ item.ip }}:{{ backend_port }};
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                }
-            }
-
-      - name: Enable NGINX site
-        file:
-          src: /etc/nginx/sites-available/{{ item.name }}
-          dest: /etc/nginx/sites-enabled/{{ item.name }}
-          state: link
-          force: yes
-
-    loop: "{{ backend_servers }}"
-    loop_control:
-      label: "{{ item.name }}"
-
-  #################################################
-  # Restart NGINX
-  #################################################
-  - name: Restart NGINX
-    service:
-      name: nginx
-      state: restarted
-      enabled: yes
-
-  #################################################
-  # Install Webmin
-  #################################################
-  - name: Download Webmin
-    get_url:
-      url: https://prdownloads.sourceforge.net/webadmin/webmin_2.105_all.deb
-      dest: /tmp/webmin.deb
-
-  - name: Install Webmin
-    apt:
-      deb: /tmp/webmin.deb
-
-  - name: Ensure Webmin running
-    service:
-      name: webmin
-      state: started
-      enabled: yes
-
-  #################################################
-  # Completion Message
-  #################################################
-  - name: Show completion message
-    debug:
-      msg: |
-        Reverse Proxy ready for all backend servers.
-        TLS terminates at reverse proxy.
-        Backend servers use HTTP only.
+- name: Enable NGINX site
+  file:
+    src: /etc/nginx/sites-available/{{ item.name }}
+    dest: /etc/nginx/sites-enabled/{{ item.name }}
+    state: link
+    force: yes
+  loop: "{{ backend_servers }}"
+  loop_control:
+    label: "{{ item.name }}"
