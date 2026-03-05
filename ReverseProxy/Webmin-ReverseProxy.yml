@@ -1,24 +1,55 @@
 ---
-- name: Deploy Reverse Proxy with Simplified CA Signing (SAN Fixed)
+- name: Deploy Reverse Proxy for All Backends with SAN Certificate
   hosts: reverseproxy
   become: yes
   gather_facts: yes
 
   vars:
-    domain_name: zabbix.dk-prod.lan
     ca_host: 10.20.10.102
     ca_dir: /opt/lab-ca
     ssl_dir: /etc/nginx/ssl
-    backend_ip: 10.20.10.101
-    backend_port: 80
     root_ca_name: rootCA
+    backends:
+      - name: proxmox-node1
+        ip: 10.20.10.11
+      - name: proxmox-node2
+        ip: 10.20.10.12
+      - name: proxmox-node3
+        ip: 10.20.10.13
+      - name: zabbix
+        ip: 10.20.10.101
+      - name: ipam
+        ip: 10.20.10.103
+      - name: pbx
+        ip: 10.20.10.113
+      - name: log
+        ip: 10.20.10.109
+      - name: webmin
+        ip: 10.20.10.115
+      - name: web
+        ip: 10.20.10.110
+      - name: semaphore
+        ip: 10.20.10.28
 
   tasks:
 
   #################################################
+  # Sort backends by last octet
+  #################################################
+  - name: Sort backends by last octet
+    set_fact:
+      sorted_backends: "{{ backends | sort(attribute='ip', reverse=false) }}"
+
+  - name: Create list of domain names
+    set_fact:
+      backend_domains: "{{ sorted_backends | map(attribute='name') | map('regex_replace', '^(.*)$', '\\1.dk-prod.lan') | list }}"
+
+  - debug:
+      msg: "Backend domains: {{ backend_domains }}"
+
+  #################################################
   # Install Required Packages
   #################################################
-
   - name: Install required packages
     apt:
       name:
@@ -33,7 +64,6 @@
   #################################################
   # Create SSL Directory
   #################################################
-
   - name: Create SSL directory
     file:
       path: "{{ ssl_dir }}"
@@ -43,7 +73,6 @@
   #################################################
   # Generate Private Key
   #################################################
-
   - name: Generate private key
     command: >
       openssl genrsa -out {{ ssl_dir }}/reverseproxy.key 4096
@@ -51,23 +80,45 @@
       creates: "{{ ssl_dir }}/reverseproxy.key"
 
   #################################################
-  # Generate CSR WITH SAN
+  # Generate CSR with SAN dynamically
   #################################################
+  - name: Create OpenSSL SAN config
+    copy:
+      dest: "{{ ssl_dir }}/openssl-san.cnf"
+      content: |
+        [ req ]
+        default_bits       = 4096
+        default_md         = sha256
+        prompt             = no
+        distinguished_name = req_distinguished_name
+        req_extensions     = v3_req
+
+        [ req_distinguished_name ]
+        C  = DK
+        ST = Denmark
+        O  = dk-prod.lan
+        CN = {{ backend_domains[0] }}
+
+        [ v3_req ]
+        subjectAltName = @alt_names
+
+        [ alt_names ]
+        {% for idx, domain in backend_domains|enumerate(start=1) %}
+        DNS.{{ idx }} = {{ domain }}
+        {% endfor %}
 
   - name: Generate CSR with SAN
     command: >
       openssl req -new
       -key {{ ssl_dir }}/reverseproxy.key
       -out {{ ssl_dir }}/reverseproxy.csr
-      -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ domain_name }}"
-      -addext "subjectAltName=DNS:{{ domain_name }}"
+      -config {{ ssl_dir }}/openssl-san.cnf
     args:
       creates: "{{ ssl_dir }}/reverseproxy.csr"
 
   #################################################
   # Transfer CSR to CA Server
   #################################################
-
   - name: Read CSR from reverse proxy
     slurp:
       src: "{{ ssl_dir }}/reverseproxy.csr"
@@ -80,9 +131,8 @@
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign CSR (COPY EXTENSIONS = SAN)
+  # Sign Certificate with SAN
   #################################################
-
   - name: Sign certificate using root CA
     command: >
       openssl x509 -req
@@ -101,7 +151,6 @@
   #################################################
   # Retrieve Signed Certificate
   #################################################
-
   - name: Read signed certificate from CA
     slurp:
       src: "{{ ca_dir }}/reverseproxy.crt"
@@ -115,16 +164,15 @@
       mode: '0600'
 
   #################################################
-  # Configure NGINX
+  # Configure NGINX with all backends
   #################################################
-
   - name: Configure NGINX reverse proxy
     copy:
       dest: /etc/nginx/sites-available/reverseproxy
       content: |
         server {
             listen 443 ssl;
-            server_name {{ domain_name }};
+            server_name {{ backend_domains | join(' ') }};
 
             ssl_certificate {{ ssl_dir }}/reverseproxy.crt;
             ssl_certificate_key {{ ssl_dir }}/reverseproxy.key;
@@ -133,7 +181,7 @@
             ssl_prefer_server_ciphers on;
 
             location / {
-                proxy_pass http://{{ backend_ip }}:{{ backend_port }};
+                proxy_pass http://$host;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -156,7 +204,6 @@
   #################################################
   # Install Webmin
   #################################################
-
   - name: Download Webmin
     get_url:
       url: https://prdownloads.sourceforge.net/webadmin/webmin_2.105_all.deb
@@ -175,15 +222,8 @@
   #################################################
   # Done
   #################################################
-
   - name: Show completion message
     debug:
       msg: |
         Reverse Proxy ready:
-        https://{{ domain_name }}
-
-        TLS terminates at reverse proxy.
-        Backend servers use HTTP only.
-
-        Webmin:
-        https://10.20.10.115:10000
+        https://{{ backend_domains | join(', ') }}
