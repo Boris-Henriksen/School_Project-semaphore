@@ -1,5 +1,5 @@
 ---
-- name: Deploy Reverse Proxy with SAN for Multiple Backends
+- name: Deploy Reverse Proxy with SAN Certificate for Multiple Backends
   hosts: reverseproxy
   become: yes
   gather_facts: yes
@@ -11,8 +11,8 @@
     root_ca_name: rootCA
     backend_port: 80
 
-    # Define your backends here
-    backends:
+    # List of backend servers and their IPs
+    backend_servers:
       - name: proxmox-node1
         ip: 10.20.10.11
       - name: proxmox-node2
@@ -34,9 +34,13 @@
       - name: semaphore
         ip: 10.20.10.28
 
-  vars_files:
-    # optional, if you want to store secrets
-    # - secrets.yml
+    # Derived lists
+    backend_domains: "{{ backend_servers | sort(attribute='ip') | map(attribute='name') | map('regex_replace', '^', '') | list }}"
+    # For example, zabbix.dk-prod.lan, ipam.dk-prod.lan etc
+    domain_suffix: "dk-prod.lan"
+    backend_domains: "{{ backend_servers | sort(attribute='ip') | map(attribute='name') | map('regex_replace', '(.*)', '\\1.' ~ domain_suffix) | list }}"
+    # Main CN for certificate
+    domain_name: "{{ backend_domains[0] }}"
 
   tasks:
 
@@ -64,14 +68,6 @@
       mode: '0700'
 
   #################################################
-  # Sort backends and build domain list
-  #################################################
-  - name: Sort backends by last octet
-    set_fact:
-      sorted_backends: "{{ backends | sort(attribute='ip') }}"
-      backend_domains: "{{ sorted_backends | map(attribute='name') | map('regex_replace', '(.*)', '\\1.dk-prod.lan') | list }}"
-
-  #################################################
   # Generate Private Key
   #################################################
   - name: Generate private key
@@ -81,7 +77,7 @@
       creates: "{{ ssl_dir }}/reverseproxy.key"
 
   #################################################
-  # Generate OpenSSL SAN config
+  # Create OpenSSL SAN config
   #################################################
   - name: Create OpenSSL SAN config
     copy:
@@ -98,14 +94,14 @@
         C  = DK
         ST = Denmark
         O  = dk-prod.lan
-        CN = {{ backend_domains[0] }}
+        CN = {{ domain_name }}
 
         [ v3_req ]
         subjectAltName = @alt_names
 
         [ alt_names ]
-{% for idx, domain in backend_domains | dictsort %}
-DNS.{{ idx+1 }} = {{ domain }}
+{% for idx in range(backend_domains | length) %}
+DNS.{{ idx + 1 }} = {{ backend_domains[idx] }}
 {% endfor %}
 
   #################################################
@@ -135,7 +131,7 @@ DNS.{{ idx+1 }} = {{ domain }}
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign certificate using root CA
+  # Sign certificate (copy extensions for SAN)
   #################################################
   - name: Sign certificate using root CA
     command: >
@@ -168,18 +164,12 @@ DNS.{{ idx+1 }} = {{ domain }}
       mode: '0600'
 
   #################################################
-  # Configure NGINX
+  # Configure NGINX Reverse Proxy
   #################################################
   - name: Configure NGINX reverse proxy
     copy:
       dest: /etc/nginx/sites-available/reverseproxy
       content: |
-        upstream backends {
-{% for backend in sorted_backends %}
-            server {{ backend.ip }}:{{ backend_port }};
-{% endfor %}
-        }
-
         server {
             listen 443 ssl;
             server_name {{ backend_domains | join(' ') }};
@@ -191,7 +181,7 @@ DNS.{{ idx+1 }} = {{ domain }}
             ssl_prefer_server_ciphers on;
 
             location / {
-                proxy_pass http://backends;
+                proxy_pass http://{{ backend_servers[0].ip }}:{{ backend_port }};
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -236,10 +226,10 @@ DNS.{{ idx+1 }} = {{ domain }}
     debug:
       msg: |
         Reverse Proxy ready:
-        https://{{ backend_domains | join(', ') }}
+        https://{{ domain_name }}
 
         TLS terminates at reverse proxy.
         Backend servers use HTTP only.
 
         Webmin:
-        https://{{ backends | selectattr('name','equalto','webmin') | first | attr('ip') }}:10000
+        https://{{ backend_servers | selectattr('name','equalto','webmin') | map(attribute='ip') | list | first }}:10000
