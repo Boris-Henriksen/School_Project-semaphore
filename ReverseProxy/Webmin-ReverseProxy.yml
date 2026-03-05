@@ -1,5 +1,5 @@
 ---
-- name: Deploy Reverse Proxy for All Backends with SAN Certificate
+- name: Deploy Reverse Proxy with SAN for Multiple Backends
   hosts: reverseproxy
   become: yes
   gather_facts: yes
@@ -9,7 +9,10 @@
     ca_dir: /opt/lab-ca
     ssl_dir: /etc/nginx/ssl
     root_ca_name: rootCA
-    backends:
+    backend_port: 80
+
+    # List of backend servers
+    backend_servers:
       - name: proxmox-node1
         ip: 10.20.10.11
       - name: proxmox-node2
@@ -31,21 +34,12 @@
       - name: semaphore
         ip: 10.20.10.28
 
+    # Extract only the domain names for SAN
+    backend_domains: "{{ backend_servers | sort(attribute='ip') | map(attribute='name') | map('regex_replace', '(.*)', '\\1.dk-prod.lan') | list }}"
+    # Pick the first domain as CN
+    domain_name: "{{ backend_domains[0] }}"
+
   tasks:
-
-  #################################################
-  # Sort backends by last octet
-  #################################################
-  - name: Sort backends by last octet
-    set_fact:
-      sorted_backends: "{{ backends | sort(attribute='ip', reverse=false) }}"
-
-  - name: Create list of domain names
-    set_fact:
-      backend_domains: "{{ sorted_backends | map(attribute='name') | map('regex_replace', '^(.*)$', '\\1.dk-prod.lan') | list }}"
-
-  - debug:
-      msg: "Backend domains: {{ backend_domains }}"
 
   #################################################
   # Install Required Packages
@@ -80,11 +74,11 @@
       creates: "{{ ssl_dir }}/reverseproxy.key"
 
   #################################################
-  # Generate CSR with SAN dynamically
+  # Create OpenSSL SAN Config
   #################################################
   - name: Create OpenSSL SAN config
     copy:
-      dest: "{{ ssl_dir }}/openssl-san.cnf"
+      dest: "{{ ssl_dir }}/reverseproxy_san.cnf"
       content: |
         [ req ]
         default_bits       = 4096
@@ -97,22 +91,25 @@
         C  = DK
         ST = Denmark
         O  = dk-prod.lan
-        CN = {{ backend_domains[0] }}
+        CN = {{ domain_name }}
 
         [ v3_req ]
         subjectAltName = @alt_names
 
         [ alt_names ]
-        {% for idx, domain in backend_domains|enumerate(start=1) %}
-        DNS.{{ idx }} = {{ domain }}
+        {% for domain in backend_domains %}
+        DNS.{{ loop.index }} = {{ domain }}
         {% endfor %}
 
+  #################################################
+  # Generate CSR with SAN
+  #################################################
   - name: Generate CSR with SAN
     command: >
       openssl req -new
       -key {{ ssl_dir }}/reverseproxy.key
       -out {{ ssl_dir }}/reverseproxy.csr
-      -config {{ ssl_dir }}/openssl-san.cnf
+      -config {{ ssl_dir }}/reverseproxy_san.cnf
     args:
       creates: "{{ ssl_dir }}/reverseproxy.csr"
 
@@ -131,7 +128,7 @@
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign Certificate with SAN
+  # Sign CSR (copy_extensions for SAN)
   #################################################
   - name: Sign certificate using root CA
     command: >
@@ -164,7 +161,7 @@
       mode: '0600'
 
   #################################################
-  # Configure NGINX with all backends
+  # Configure NGINX
   #################################################
   - name: Configure NGINX reverse proxy
     copy:
@@ -181,7 +178,7 @@
             ssl_prefer_server_ciphers on;
 
             location / {
-                proxy_pass http://$host;
+                proxy_pass http://$host:{{ backend_port }};
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -226,4 +223,10 @@
     debug:
       msg: |
         Reverse Proxy ready:
-        https://{{ backend_domains | join(', ') }}
+        https://{{ domain_name }}
+
+        TLS terminates at reverse proxy.
+        Backend servers use HTTP only.
+
+        Webmin:
+        https://{{ backend_servers | selectattr('name','equalto','webmin') | map(attribute='ip') | first }}:10000
