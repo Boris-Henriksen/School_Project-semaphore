@@ -10,9 +10,8 @@
     ssl_dir: /etc/nginx/ssl
     root_ca_name: rootCA
     backend_port: 80
-
-    # List of backend servers
-    backend_servers:
+    # List of backend servers: name + IP
+    backends:
       - name: proxmox-node1
         ip: 10.20.10.11
       - name: proxmox-node2
@@ -34,15 +33,10 @@
       - name: semaphore
         ip: 10.20.10.28
 
-    # Build SAN domains sorted by IP, avoid double .dk-prod.lan
-    backend_domains: >-
-      {{ backend_servers
-         | sort(attribute='ip')
-         | map(attribute='name')
-         | map('regex_replace', '(?!.*\\.dk-prod\\.lan$)(.*)', '\\1.dk-prod.lan')
-         | list }}
+    # Compute domains list: "<name>.dk-prod.lan"
+    backend_domains: "{{ backends | sort(attribute='ip') | map(attribute='name') | map('regex_replace', '(.*)', '\\1.dk-prod.lan') | list }}"
 
-    # Use first backend as CN
+    # Main certificate CN / server_name
     domain_name: "{{ backend_domains[0] }}"
 
   tasks:
@@ -103,12 +97,12 @@
         subjectAltName = @alt_names
 
         [ alt_names ]
-        {% for idx, domain in backend_domains | enumerate(start=1) %}
-        DNS.{{ idx }} = {{ domain }}
+        {% for domain in backend_domains %}
+        DNS.{{ loop.index }} = {{ domain }}
         {% endfor %}
 
   #################################################
-  # Generate CSR using SAN config
+  # Generate CSR WITH SAN
   #################################################
   - name: Generate CSR with SAN
     command: >
@@ -134,7 +128,7 @@
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign CSR using Root CA with SAN
+  # Sign Certificate (copy SAN)
   #################################################
   - name: Sign certificate using root CA
     command: >
@@ -184,7 +178,7 @@
             ssl_prefer_server_ciphers on;
 
             location / {
-                proxy_pass http://{{ backend_servers[0].ip }}:{{ backend_port }};
+                proxy_pass http://{{ backend_ip }}:{{ backend_port }};
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -205,24 +199,6 @@
       enabled: yes
 
   #################################################
-  # Install Webmin
-  #################################################
-  - name: Download Webmin
-    get_url:
-      url: https://prdownloads.sourceforge.net/webadmin/webmin_2.105_all.deb
-      dest: /tmp/webmin.deb
-
-  - name: Install Webmin
-    apt:
-      deb: /tmp/webmin.deb
-
-  - name: Ensure Webmin running
-    service:
-      name: webmin
-      state: started
-      enabled: yes
-
-  #################################################
   # Done
   #################################################
   - name: Show completion message
@@ -230,7 +206,4 @@
       msg: |
         Reverse Proxy ready:
         CN: {{ domain_name }}
-        SAN: {{ backend_domains | join(', ') }}
-        TLS terminates at reverse proxy.
-        Backend servers use HTTP only.
-        Webmin: https://{{ backend_servers | selectattr('name','equalto','webmin') | map(attribute='ip') | first }}:10000
+        SANs: {{ backend_domains | join(', ') }}
