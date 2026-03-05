@@ -9,7 +9,6 @@
     root_ca_name: rootCA
     domain_suffix: "dk-prod.lan"
     
-    # Listen over dine backends
     services:
       - { name: "proxmox-node1", ip: "10.20.10.11", port: 8006, proto: "https" }
       - { name: "proxmox-node2", ip: "10.20.10.12", port: 8006, proto: "https" }
@@ -27,6 +26,7 @@
       apt:
         name: [nginx, openssl, ca-certificates]
         state: present
+        update_cache: yes
 
     - name: Create SSL directory
       file:
@@ -35,7 +35,7 @@
         mode: '0700'
 
     #################################################
-    # SSL CERTIFICATE LOOP
+    # SSL CERTIFICATE LOOP (Uses inner_ssl_tasks.yml)
     #################################################
 
     - name: Generate Keys, CSRs and Sign Certificates
@@ -45,10 +45,15 @@
         loop_var: service
 
     #################################################
-    # NGINX CONFIGURATION
+    # NGINX CONFIGURATION & CLEANUP
     #################################################
 
-    - name: Create Nginx configurations
+    - name: Remove default Nginx site to prevent 404 conflicts
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Create Nginx configurations with Advanced Headers
       copy:
         dest: "/etc/nginx/sites-available/{{ item.name }}"
         content: |
@@ -59,21 +64,40 @@
               ssl_certificate {{ ssl_dir }}/{{ item.name }}.crt;
               ssl_certificate_key {{ ssl_dir }}/{{ item.name }}.key;
 
+              # Optimering til store anmodninger
+              client_max_body_size 0;
+
               location / {
                   proxy_pass {{ item.proto }}://{{ item.ip }}:{{ item.port }};
+                  
+                  # Kritiske headers til IPAM, PBX og Zabbix
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_ssl_verify off; # Vigtigt for Proxmox/Webmin selv-signerede certs
+                  proxy_set_header X-Forwarded-Proto $scheme;
+
+                  # WebSocket support (Vigtigt for PBX og Proxmox shell)
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+
+                  # Backend SSL indstillinger
+                  proxy_ssl_verify off;
+                  proxy_ssl_session_reuse on;
+                  
+                  # Timeout indstillinger for stabile forbindelser
+                  proxy_read_timeout 90;
+                  proxy_redirect off;
               }
           }
       loop: "{{ services }}"
 
-    - name: Enable Nginx sites
+    - name: Enable Nginx sites (Force symlinks)
       file:
         src: "/etc/nginx/sites-available/{{ item.name }}"
         dest: "/etc/nginx/sites-enabled/{{ item.name }}"
         state: link
+        force: yes
       loop: "{{ services }}"
       notify: Restart Nginx
 
