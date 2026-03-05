@@ -9,8 +9,8 @@
     ca_host: 10.20.10.102
     ca_dir: /opt/lab-ca
     ssl_dir: /etc/nginx/ssl
-    backend_ip: 10.20.10.200
-    backend_port: 8080
+    backend_ip: 10.20.10.101
+    backend_port: 80
     root_ca_name: rootCA
 
   tasks:
