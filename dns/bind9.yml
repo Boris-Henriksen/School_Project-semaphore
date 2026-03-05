@@ -10,13 +10,48 @@
       - ns1
 
     a_records:
+      - name: ca
+        ip: 10.20.10.102
+      - name: ntp
+        ip: 10.20.10.108
       - name: ns1
         ip: 10.20.10.111
+      - name: ns2
+        ip: 10.20.10.112
+      - name: smtp
+        ip: 10.20.10.114
+
+
+
+      
+        #################################
+        ### WEB Servers Proxy Reroute ###
+        #################################
       - name: proxmox-node1
-        ip: 10.20.10.11
+        ip: 10.20.10.115
+      - name: proxmox-node2
+        ip: 10.20.10.115
+      - name: proxmox-node3
+        ip: 10.20.10.115
       - name: zabbix
         ip: 10.20.10.115
+      - name: ipam
+        ip: 10.20.10.115
+      - name: pbx
+        ip: 10.20.10.115
+      - name: log
+        ip: 10.20.10.115
+      - name: webmin
+        ip: 10.20.10.115
+      - name: web
+        ip: 10.20.10.115
+      - name: semaphore
+        ip: 10.20.10.115
 
+
+
+
+        
     cname_records: []
 
     # --- Reverse Zone Variables ---
@@ -25,12 +60,39 @@
         ttl: 86400
         serial: 2026012801
         ptr_records:
-          - ip_last_octet: 111
-            hostname: ns1.dk-prod.lan.
           - ip_last_octet: 11
             hostname: proxmox-node1.dk-prod.lan.
+          - ip_last_octet: 12
+            hostname: proxmox-node2.dk-prod.lan.
+          - ip_last_octet: 13
+            hostname: proxmox-node3.dk-prod.lan.
+          - ip_last_octet: 28
+            hostname: semaphore.dk-prod.lan.
           - ip_last_octet: 101
-            hostname: zabbix.dk-prod.lan
+            hostname: zabbix.dk-prod.lan.
+          - ip_last_octet: 102
+            hostname: ca.dk-prod.lan.
+          - ip_last_octet: 103
+            hostname: ipam.dk-prod.lan.
+          - ip_last_octet: 108
+            hostname: ntp.dk-prod.lan.
+          - ip_last_octet: 109
+            hostname: log.dk-prod.lan.
+          - ip_last_octet: 110
+            hostname: web.dk-prod.lan.
+          - ip_last_octet: 111
+            hostname: ns1.dk-prod.lan.
+          - ip_last_octet: 112
+            hostname: ns2.dk-prod.lan.
+          - ip_last_octet: 113
+            hostname: pbx.dk-prod.lan.
+          - ip_last_octet: 114
+            hostname: smtp.dk-prod.lan.
+          - ip_last_octet: 115
+            hostname: webmin.dk-prod.lan.
+
+
+
       - zone_name: "2.20.10.in-addr.arpa"
         ttl: 86400
         serial: 2026012801
