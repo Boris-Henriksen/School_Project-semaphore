@@ -1,5 +1,5 @@
 ---
-- name: Deploy Reverse Proxy with Proper CA Signing
+- name: Deploy Reverse Proxy with Simplified CA Signing
   hosts: reverseproxy
   become: yes
   gather_facts: yes
@@ -11,6 +11,7 @@
     ssl_dir: /etc/nginx/ssl
     backend_ip: 10.20.10.200
     backend_port: 8080
+    root_ca_name: rootCA
 
   tasks:
 
@@ -70,28 +71,30 @@
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign Certificate Using Proper CA Database
+  # Sign CSR Using Root CA (openssl x509 method)
   #################################################
 
-  - name: Sign certificate using CA config and v3_server
+  - name: Sign certificate using root CA
     command: >
-      openssl ca -batch
-      -config {{ ca_dir }}/openssl.cnf
-      -extensions v3_server
+      openssl x509 -req
       -in {{ ca_dir }}/reverseproxy.csr
-      -out {{ ca_dir }}/certs/reverseproxy.crt
+      -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+      -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
+      -CAcreateserial
+      -out {{ ca_dir }}/reverseproxy.crt
       -days 825
+      -sha256
     delegate_to: "{{ ca_host }}"
     args:
-      creates: "{{ ca_dir }}/certs/reverseproxy.crt"
+      creates: "{{ ca_dir }}/reverseproxy.crt"
 
   #################################################
-  # Retrieve Signed Certificate from CA
+  # Retrieve Signed Certificate
   #################################################
 
   - name: Read signed certificate from CA
     slurp:
-      src: "{{ ca_dir }}/certs/reverseproxy.crt"
+      src: "{{ ca_dir }}/reverseproxy.crt"
     delegate_to: "{{ ca_host }}"
     register: signed_cert
 
@@ -119,7 +122,6 @@
             ssl_protocols TLSv1.2 TLSv1.3;
             ssl_prefer_server_ciphers on;
 
-            # TLS ends here
             location / {
                 proxy_pass http://{{ backend_ip }}:{{ backend_port }};
                 proxy_set_header Host $host;
@@ -160,7 +162,7 @@
       enabled: yes
 
   #################################################
-  # Completion
+  # Done
   #################################################
 
   - name: Show completion message
