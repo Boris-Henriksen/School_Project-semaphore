@@ -29,7 +29,7 @@
             hostname: ns1.dk-prod.lan.
           - ip_last_octet: 11
             hostname: proxmox-node1.dk-prod.lan.
-          - ip_last_octet: 115
+          - ip_last_octet: 101
             hostname: zabbix.dk-prod.lan
       - zone_name: "2.20.10.in-addr.arpa"
         ttl: 86400
