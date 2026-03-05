@@ -8,6 +8,7 @@
 
     ns_records:
       - ns1
+      - ns2
 
     a_records:
       - name: ca
