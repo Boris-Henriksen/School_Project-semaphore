@@ -1,5 +1,5 @@
 ---
-- name: Deploy Reverse Proxy with Simplified CA Signing
+- name: Deploy Reverse Proxy with Simplified CA Signing (SAN Fixed)
   hosts: reverseproxy
   become: yes
   gather_facts: yes
@@ -31,7 +31,7 @@
       update_cache: yes
 
   #################################################
-  # Generate Private Key and CSR
+  # Create SSL Directory
   #################################################
 
   - name: Create SSL directory
@@ -40,18 +40,27 @@
       state: directory
       mode: '0700'
 
+  #################################################
+  # Generate Private Key
+  #################################################
+
   - name: Generate private key
     command: >
       openssl genrsa -out {{ ssl_dir }}/reverseproxy.key 4096
     args:
       creates: "{{ ssl_dir }}/reverseproxy.key"
 
-  - name: Generate CSR
+  #################################################
+  # Generate CSR WITH SAN
+  #################################################
+
+  - name: Generate CSR with SAN
     command: >
       openssl req -new
       -key {{ ssl_dir }}/reverseproxy.key
       -out {{ ssl_dir }}/reverseproxy.csr
       -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ domain_name }}"
+      -addext "subjectAltName=DNS:{{ domain_name }}"
     args:
       creates: "{{ ssl_dir }}/reverseproxy.csr"
 
@@ -71,7 +80,7 @@
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign CSR Using Root CA (openssl x509 method)
+  # Sign CSR (COPY EXTENSIONS = SAN)
   #################################################
 
   - name: Sign certificate using root CA
@@ -84,6 +93,7 @@
       -out {{ ca_dir }}/reverseproxy.crt
       -days 825
       -sha256
+      -copy_extensions copy
     delegate_to: "{{ ca_host }}"
     args:
       creates: "{{ ca_dir }}/reverseproxy.crt"
@@ -105,7 +115,7 @@
       mode: '0600'
 
   #################################################
-  # Configure NGINX (TLS termination only)
+  # Configure NGINX
   #################################################
 
   - name: Configure NGINX reverse proxy
@@ -135,6 +145,7 @@
       src: /etc/nginx/sites-available/reverseproxy
       dest: /etc/nginx/sites-enabled/reverseproxy
       state: link
+      force: yes
 
   - name: Restart NGINX
     service:
