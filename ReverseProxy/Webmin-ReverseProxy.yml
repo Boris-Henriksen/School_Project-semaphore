@@ -1,5 +1,5 @@
 ---
-- name: Deploy Reverse Proxy with SSL for Multiple Backends
+- name: Deploy Reverse Proxy with SSL for multiple backends
   hosts: reverseproxy
   become: yes
   gather_facts: yes
@@ -35,7 +35,7 @@
   tasks:
 
   #################################################
-  # Install Required Packages
+  # Install required packages
   #################################################
   - name: Install required packages
     apt:
@@ -49,7 +49,7 @@
       update_cache: yes
 
   #################################################
-  # Create SSL Directory
+  # Create SSL directory
   #################################################
   - name: Create SSL directory
     file:
@@ -58,7 +58,7 @@
       mode: '0700'
 
   #################################################
-  # Generate Private Keys per backend
+  # Generate private key, OpenSSL config, and CSR per backend
   #################################################
   - name: Generate private key per backend
     command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
@@ -68,38 +68,30 @@
     loop_control:
       label: "{{ item.name }}"
 
-  #################################################
-  # Create OpenSSL Config per backend
-  #################################################
   - name: Create OpenSSL config per backend
     copy:
       dest: "{{ ssl_dir }}/{{ item.name }}_openssl.cnf"
       content: |
-        [req]
-        default_bits = 4096
-        prompt = no
-        default_md = sha256
-        distinguished_name = dn
+        [ req ]
+        distinguished_name = req_distinguished_name
         req_extensions = v3_req
+        prompt = no
 
-        [dn]
+        [ req_distinguished_name ]
         C = DK
         ST = Denmark
         O = dk-prod.lan
         CN = {{ item.name }}.dk-prod.lan
 
-        [v3_req]
+        [ v3_req ]
         subjectAltName = @alt_names
 
-        [alt_names]
+        [ alt_names ]
         DNS.1 = {{ item.name }}.dk-prod.lan
     loop: "{{ backend_servers }}"
     loop_control:
       label: "{{ item.name }}"
 
-  #################################################
-  # Generate CSR per backend
-  #################################################
   - name: Generate CSR per backend
     command: >
       openssl req -new
@@ -113,20 +105,19 @@
       label: "{{ item.name }}"
 
   #################################################
-  # Copy CSR to CA server
+  # Copy CSRs to CA server
   #################################################
   - name: Copy CSR to CA server
     copy:
       src: "{{ ssl_dir }}/{{ item.name }}.csr"
       dest: "{{ ca_dir }}/{{ item.name }}.csr"
-      remote_src: yes
     delegate_to: "{{ ca_host }}"
     loop: "{{ backend_servers }}"
     loop_control:
       label: "{{ item.name }}"
 
   #################################################
-  # Sign CSR on CA server
+  # Sign CSRs on CA server
   #################################################
   - name: Sign CSR on CA server
     command: >
@@ -140,14 +131,12 @@
       -sha256
       -copy_extensions copy
     delegate_to: "{{ ca_host }}"
-    args:
-      creates: "{{ ca_dir }}/{{ item.name }}.crt"
     loop: "{{ backend_servers }}"
     loop_control:
       label: "{{ item.name }}"
 
   #################################################
-  # Copy signed certificate back to reverse proxy
+  # Copy signed certificates back to reverse proxy
   #################################################
   - name: Copy signed certificate back
     copy:
@@ -161,11 +150,11 @@
       label: "{{ item.name }}"
 
   #################################################
-  # Configure NGINX per backend
+  # Configure NGINX reverse proxy for each backend
   #################################################
   - name: Configure NGINX reverse proxy per backend
     copy:
-      dest: /etc/nginx/sites-available/{{ item.name }}
+      dest: "/etc/nginx/sites-available/{{ item.name }}"
       content: |
         server {
             listen 443 ssl;
@@ -188,10 +177,10 @@
     loop_control:
       label: "{{ item.name }}"
 
-  - name: Enable NGINX site per backend
+  - name: Enable NGINX sites
     file:
-      src: /etc/nginx/sites-available/{{ item.name }}
-      dest: /etc/nginx/sites-enabled/{{ item.name }}
+      src: "/etc/nginx/sites-available/{{ item.name }}"
+      dest: "/etc/nginx/sites-enabled/{{ item.name }}"
       state: link
       force: yes
     loop: "{{ backend_servers }}"
@@ -205,7 +194,7 @@
       enabled: yes
 
   #################################################
-  # Install Webmin
+  # Optional: Install Webmin
   #################################################
   - name: Download Webmin
     get_url:
@@ -223,11 +212,11 @@
       enabled: yes
 
   #################################################
-  # Completion Message
+  # Done
   #################################################
   - name: Show completion message
     debug:
       msg: |
-        Reverse Proxy ready for all backend servers.
+        Reverse Proxy ready with SSL for all backend servers.
         TLS terminates at reverse proxy.
-        Backend servers use HTTP only.
+        Webmin available at https://10.20.10.115:10000
