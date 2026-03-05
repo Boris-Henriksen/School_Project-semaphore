@@ -18,7 +18,7 @@
       - { name: "ipam", ip: "10.20.10.103", port: 80, proto: "http" }
       - { name: "pbx", ip: "10.20.10.113", port: 80, proto: "http" }
       - { name: "log", ip: "10.20.10.109", port: 80, proto: "http" }
-      - { name: "webmin-panel", ip: "10.20.10.115", port: 10000, proto: "https" }
+      - { name: "webmin", ip: "10.20.10.115", port: 10000, proto: "https" }
       - { name: "web", ip: "10.20.10.110", port: 80, proto: "http" }
       - { name: "semaphore", ip: "10.20.10.28", port: 3000, proto: "http" }
 
