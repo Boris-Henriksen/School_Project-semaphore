@@ -14,6 +14,8 @@
         ip: 10.20.10.111
       - name: proxmox-node1
         ip: 10.20.10.11
+      - name: zabbix
+        ip: 10.20.10.115
 
     cname_records: []
 
@@ -27,6 +29,8 @@
             hostname: ns1.dk-prod.lan.
           - ip_last_octet: 11
             hostname: proxmox-node1.dk-prod.lan.
+          - ip_last_octet: 115
+            hostname: zabbix.dk-prod.lan
       - zone_name: "2.20.10.in-addr.arpa"
         ttl: 86400
         serial: 2026012801
