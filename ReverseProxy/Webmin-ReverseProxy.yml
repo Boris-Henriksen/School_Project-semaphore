@@ -1,145 +1,164 @@
 ---
-- name: Setup Webmin Reverse Proxy with SSL
+- name: Deploy Reverse Proxy with Proper CA Signing
   hosts: reverseproxy
   become: yes
   gather_facts: yes
 
   vars:
+    domain_name: reverseproxy.dk-prod.lan
+    ca_host: 10.20.10.102
+    ca_dir: /opt/lab-ca
     ssl_dir: /etc/nginx/ssl
-    temp_rootca: /tmp/rootCA.crt
-    temp_webmin: /tmp/webmin-latest.deb
-    lab_root_ca_path: /opt/lab-ca/certs/rootCA.crt   # on CA server
-    webmin_fqdn: webmin.dk-prod.lan
-    webmin_port: 10000
+    backend_ip: 10.20.10.200
+    backend_port: 8080
 
   tasks:
 
-    - name: Install prerequisites
-      apt:
-        name:
-          - nginx
-          - wget
-          - curl
-          - jq
-          - ca-certificates
-        state: present
-        update_cache: yes
+  #################################################
+  # Install Packages
+  #################################################
 
-    - name: Fetch Lab Root CA from CA server
-      fetch:
-        src: "{{ lab_root_ca_path }}"
-        dest: "{{ temp_rootca }}"
-        flat: yes
-      delegate_to: ca-openssl
+  - name: Install required packages
+    apt:
+      name:
+        - nginx
+        - openssl
+        - ca-certificates
+        - wget
+        - perl
+      state: present
+      update_cache: yes
 
-    - name: Copy Lab Root CA into SSL directory
-      copy:
-        src: "{{ temp_rootca }}"
-        dest: "{{ ssl_dir }}/rootCA.crt"
-        owner: root
-        group: root
-        mode: '0644'
+  #################################################
+  # Generate Key + CSR
+  #################################################
 
-    - name: Update system trust for Root CA
-      copy:
-        src: "{{ ssl_dir }}/rootCA.crt"
-        dest: /usr/local/share/ca-certificates/rootCA.crt
-      notify:
-        - Update CA Trust
+  - name: Create SSL directory
+    file:
+      path: "{{ ssl_dir }}"
+      state: directory
+      mode: '0700'
 
-    - name: Get latest Webmin download link via GitHub API
-      vars:
-        gh_api: "https://api.github.com/repos/webmin/webmin/releases/latest"
-      uri:
-        url: "{{ gh_api }}"
-        return_content: yes
-      register: webmin_api
+  - name: Generate private key
+    command: >
+      openssl genrsa -out {{ ssl_dir }}/reverseproxy.key 4096
+    args:
+      creates: "{{ ssl_dir }}/reverseproxy.key"
 
-    - name: Set latest Webmin .deb URL
-      set_fact:
-        webmin_download_url: >
-          {{ webmin_api.json.assets | selectattr("name", "search", "_all.deb$") | map(attribute="browser_download_url") | list | first }}
+  - name: Generate CSR
+    command: >
+      openssl req -new
+      -key {{ ssl_dir }}/reverseproxy.key
+      -out {{ ssl_dir }}/reverseproxy.csr
+      -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ domain_name }}"
+    args:
+      creates: "{{ ssl_dir }}/reverseproxy.csr"
 
-    - name: Validate Webmin download URL
-      fail:
-        msg: "Could not determine the latest Webmin .deb URL from GitHub releases!"
-      when: webmin_download_url is not defined
+  #################################################
+  # Sign CSR using CA database (Proper Way)
+  #################################################
 
-    - name: Download latest Webmin .deb
-      get_url:
-        url: "{{ webmin_download_url }}"
-        dest: "{{ temp_webmin }}"
-        mode: '0644'
+  - name: Copy CSR to CA server
+    copy:
+      src: "{{ ssl_dir }}/reverseproxy.csr"
+      dest: "{{ ca_dir }}/reverseproxy.csr"
+    delegate_to: "{{ ca_host }}"
 
-    - name: Install Webmin
-      apt:
-        deb: "{{ temp_webmin }}"
-      notify:
-        - Restart Webmin
+  - name: Sign certificate using CA config and v3_server
+    command: >
+      openssl ca -batch
+      -config {{ ca_dir }}/openssl.cnf
+      -extensions v3_server
+      -in {{ ca_dir }}/reverseproxy.csr
+      -out {{ ca_dir }}/certs/reverseproxy.crt
+      -days 825
+    delegate_to: "{{ ca_host }}"
+    args:
+      creates: "{{ ca_dir }}/certs/reverseproxy.crt"
 
-    - name: Disable internal Webmin SSL
-      lineinfile:
-        path: /etc/webmin/miniserv.conf
-        regexp: '^ssl='
-        line: 'ssl=0'
-      notify:
-        - Restart Webmin
+  - name: Fetch signed certificate
+    fetch:
+      src: "{{ ca_dir }}/certs/reverseproxy.crt"
+      dest: "/tmp/reverseproxy.crt"
+      flat: yes
+    delegate_to: "{{ ca_host }}"
+    run_once: true
 
-    - name: Ensure SSL directory exists
-      file:
-        path: "{{ ssl_dir }}"
-        state: directory
-        mode: '0755'
+  - name: Install signed certificate
+    copy:
+      src: "/tmp/reverseproxy.crt"
+      dest: "{{ ssl_dir }}/reverseproxy.crt"
 
-    - name: Create NGINX site config
-      copy:
-        dest: /etc/nginx/sites-available/webmin.conf
-        content: |
-          server {
-              listen 443 ssl;
-              server_name {{ webmin_fqdn }};
+  #################################################
+  # Configure NGINX (TLS termination only)
+  #################################################
 
-              ssl_certificate {{ ssl_dir }}/rootCA.crt;
-              ssl_certificate_key {{ ssl_dir }}/rootCA.crt;
+  - name: Configure NGINX reverse proxy
+    copy:
+      dest: /etc/nginx/sites-available/reverseproxy
+      content: |
+        server {
+            listen 443 ssl;
+            server_name {{ domain_name }};
 
-              location / {
-                  proxy_pass http://127.0.0.1:{{ webmin_port }};
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto $scheme;
-              }
-          }
-      notify:
-        - Test and Reload NGINX
+            ssl_certificate {{ ssl_dir }}/reverseproxy.crt;
+            ssl_certificate_key {{ ssl_dir }}/reverseproxy.key;
 
-    - name: Enable Webmin site
-      file:
-        src: /etc/nginx/sites-available/webmin.conf
-        dest: /etc/nginx/sites-enabled/webmin.conf
-        state: link
-      notify:
-        - Test and Reload NGINX
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_prefer_server_ciphers on;
 
-  handlers:
+            # TLS ends here
+            location / {
+                proxy_pass http://{{ backend_ip }}:{{ backend_port }};
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+        }
 
-    - name: Test and Reload NGINX
-      block:
-        - name: Test NGINX config
-          command: nginx -t
-          register: nginx_test
-          ignore_errors: yes
+  - name: Enable NGINX site
+    file:
+      src: /etc/nginx/sites-available/reverseproxy
+      dest: /etc/nginx/sites-enabled/reverseproxy
+      state: link
 
-        - name: Reload NGINX if valid
-          service:
-            name: nginx
-            state: reloaded
-          when: nginx_test.rc == 0
+  - name: Restart NGINX
+    service:
+      name: nginx
+      state: restarted
+      enabled: yes
 
-    - name: Restart Webmin
-      service:
-        name: webmin
-        state: restarted
+  #################################################
+  # Install Webmin
+  #################################################
 
-    - name: Update CA Trust
-      command: update-ca-certificates
+  - name: Download Webmin
+    get_url:
+      url: https://prdownloads.sourceforge.net/webadmin/webmin_2.105_all.deb
+      dest: /tmp/webmin.deb
+
+  - name: Install Webmin
+    apt:
+      deb: /tmp/webmin.deb
+
+  - name: Ensure Webmin running
+    service:
+      name: webmin
+      state: started
+      enabled: yes
+
+  #################################################
+  # Done
+  #################################################
+
+  - name: Show completion
+    debug:
+      msg: |
+        Reverse Proxy ready:
+        https://{{ domain_name }}
+
+        TLS terminates at reverse proxy.
+        Backend servers use HTTP only.
+
+        Webmin:
+        https://10.20.10.115:10000
