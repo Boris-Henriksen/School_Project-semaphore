@@ -15,7 +15,7 @@
   tasks:
 
   #################################################
-  # Install Packages
+  # Install Required Packages
   #################################################
 
   - name: Install required packages
@@ -30,7 +30,7 @@
       update_cache: yes
 
   #################################################
-  # Generate Key + CSR
+  # Generate Private Key and CSR
   #################################################
 
   - name: Create SSL directory
@@ -55,15 +55,23 @@
       creates: "{{ ssl_dir }}/reverseproxy.csr"
 
   #################################################
-  # Sign CSR using CA database (Proper Way)
+  # Transfer CSR to CA Server
   #################################################
 
-  - name: Copy CSR to CA server
-    copy:
+  - name: Read CSR from reverse proxy
+    slurp:
       src: "{{ ssl_dir }}/reverseproxy.csr"
+    register: csr_file
+
+  - name: Write CSR to CA server
+    copy:
+      content: "{{ csr_file.content | b64decode }}"
       dest: "{{ ca_dir }}/reverseproxy.csr"
-      remote_src: yes
     delegate_to: "{{ ca_host }}"
+
+  #################################################
+  # Sign Certificate Using Proper CA Database
+  #################################################
 
   - name: Sign certificate using CA config and v3_server
     command: >
@@ -77,18 +85,21 @@
     args:
       creates: "{{ ca_dir }}/certs/reverseproxy.crt"
 
-  - name: Fetch signed certificate
-    fetch:
-      src: "{{ ca_dir }}/certs/reverseproxy.crt"
-      dest: "/tmp/reverseproxy.crt"
-      flat: yes
-    delegate_to: "{{ ca_host }}"
-    run_once: true
+  #################################################
+  # Retrieve Signed Certificate from CA
+  #################################################
 
-  - name: Install signed certificate
+  - name: Read signed certificate from CA
+    slurp:
+      src: "{{ ca_dir }}/certs/reverseproxy.crt"
+    delegate_to: "{{ ca_host }}"
+    register: signed_cert
+
+  - name: Install signed certificate on reverse proxy
     copy:
-      src: "/tmp/reverseproxy.crt"
+      content: "{{ signed_cert.content | b64decode }}"
       dest: "{{ ssl_dir }}/reverseproxy.crt"
+      mode: '0600'
 
   #################################################
   # Configure NGINX (TLS termination only)
@@ -149,10 +160,10 @@
       enabled: yes
 
   #################################################
-  # Done
+  # Completion
   #################################################
 
-  - name: Show completion
+  - name: Show completion message
     debug:
       msg: |
         Reverse Proxy ready:
