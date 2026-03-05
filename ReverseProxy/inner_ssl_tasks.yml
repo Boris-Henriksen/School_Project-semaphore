@@ -1,0 +1,52 @@
+- name: Generate private key for {{ service.name }}
+  command: "openssl genrsa -out {{ ssl_dir }}/{{ service.name }}.key 4096"
+  args:
+    creates: "{{ ssl_dir }}/{{ service.name }}.key"
+
+- name: Generate CSR for {{ service.name }}
+  command: >
+    openssl req -new
+    -key {{ ssl_dir }}/{{ service.name }}.key
+    -out {{ ssl_dir }}/{{ service.name }}.csr
+    -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ service.name }}.{{ domain_suffix }}"
+    -addext "subjectAltName=DNS:{{ service.name }}.{{ domain_suffix }}"
+  args:
+    creates: "{{ ssl_dir }}/{{ service.name }}.csr"
+
+- name: Transfer CSR to CA for {{ service.name }}
+  slurp:
+    src: "{{ ssl_dir }}/{{ service.name }}.csr"
+  register: temp_csr
+
+- name: Write CSR on CA for {{ service.name }}
+  copy:
+    content: "{{ temp_csr.content | b64decode }}"
+    dest: "{{ ca_dir }}/{{ service.name }}.csr"
+  delegate_to: "{{ ca_host }}"
+
+- name: Sign CSR on CA for {{ service.name }}
+  command: >
+    openssl x509 -req
+    -in {{ ca_dir }}/{{ service.name }}.csr
+    -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+    -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
+    -CAcreateserial
+    -out {{ ca_dir }}/{{ service.name }}.crt
+    -days 825
+    -sha256
+    -copy_extensions copy
+  delegate_to: "{{ ca_host }}"
+  args:
+    creates: "{{ ca_dir }}/{{ service.name }}.crt"
+
+- name: Get signed cert back for {{ service.name }}
+  slurp:
+    src: "{{ ca_dir }}/{{ service.name }}.crt"
+  delegate_to: "{{ ca_host }}"
+  register: temp_cert
+
+- name: Install signed cert on proxy for {{ service.name }}
+  copy:
+    content: "{{ temp_cert.content | b64decode }}"
+    dest: "{{ ssl_dir }}/{{ service.name }}.crt"
+    mode: '0600'
