@@ -1,5 +1,5 @@
 ---
-- name: Deploy Reverse Proxy with SAN for Multiple Backends
+- name: Deploy Reverse Proxy with SAN for All Backends
   hosts: reverseproxy
   become: yes
   gather_facts: yes
@@ -34,9 +34,15 @@
       - name: semaphore
         ip: 10.20.10.28
 
-    # Extract only the domain names for SAN
-    backend_domains: "{{ backend_servers | sort(attribute='ip') | map(attribute='name') | map('regex_replace', '(.*)', '\\1.dk-prod.lan') | list }}"
-    # Pick the first domain as CN
+    # Build SAN domains sorted by IP, avoid double .dk-prod.lan
+    backend_domains: >-
+      {{ backend_servers
+         | sort(attribute='ip')
+         | map(attribute='name')
+         | map('regex_replace', '(?!.*\\.dk-prod\\.lan$)(.*)', '\\1.dk-prod.lan')
+         | list }}
+
+    # Use first backend as CN
     domain_name: "{{ backend_domains[0] }}"
 
   tasks:
@@ -78,7 +84,7 @@
   #################################################
   - name: Create OpenSSL SAN config
     copy:
-      dest: "{{ ssl_dir }}/reverseproxy_san.cnf"
+      dest: "{{ ssl_dir }}/san.cnf"
       content: |
         [ req ]
         default_bits       = 4096
@@ -97,19 +103,19 @@
         subjectAltName = @alt_names
 
         [ alt_names ]
-        {% for domain in backend_domains %}
-        DNS.{{ loop.index }} = {{ domain }}
+        {% for idx, domain in backend_domains | enumerate(start=1) %}
+        DNS.{{ idx }} = {{ domain }}
         {% endfor %}
 
   #################################################
-  # Generate CSR with SAN
+  # Generate CSR using SAN config
   #################################################
   - name: Generate CSR with SAN
     command: >
       openssl req -new
       -key {{ ssl_dir }}/reverseproxy.key
       -out {{ ssl_dir }}/reverseproxy.csr
-      -config {{ ssl_dir }}/reverseproxy_san.cnf
+      -config {{ ssl_dir }}/san.cnf
     args:
       creates: "{{ ssl_dir }}/reverseproxy.csr"
 
@@ -128,7 +134,7 @@
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign CSR (copy_extensions for SAN)
+  # Sign CSR using Root CA with SAN
   #################################################
   - name: Sign certificate using root CA
     command: >
@@ -169,7 +175,7 @@
       content: |
         server {
             listen 443 ssl;
-            server_name {{ backend_domains | join(' ') }};
+            server_name {{ domain_name }};
 
             ssl_certificate {{ ssl_dir }}/reverseproxy.crt;
             ssl_certificate_key {{ ssl_dir }}/reverseproxy.key;
@@ -178,7 +184,7 @@
             ssl_prefer_server_ciphers on;
 
             location / {
-                proxy_pass http://$host:{{ backend_port }};
+                proxy_pass http://{{ backend_servers[0].ip }}:{{ backend_port }};
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -223,10 +229,8 @@
     debug:
       msg: |
         Reverse Proxy ready:
-        https://{{ domain_name }}
-
+        CN: {{ domain_name }}
+        SAN: {{ backend_domains | join(', ') }}
         TLS terminates at reverse proxy.
         Backend servers use HTTP only.
-
-        Webmin:
-        https://{{ backend_servers | selectattr('name','equalto','webmin') | map(attribute='ip') | first }}:10000
+        Webmin: https://{{ backend_servers | selectattr('name','equalto','webmin') | map(attribute='ip') | first }}:10000
