@@ -113,17 +113,6 @@
       label: "{{ item.name }}"
 
   #################################################
-  # Verify CSR files exist before copying
-  #################################################
-  - name: List generated CSRs
-    command: ls -l {{ ssl_dir }}/
-    register: csr_list
-
-  - name: Show CSR files
-    debug:
-      var: csr_list.stdout_lines
-
-  #################################################
   # Copy CSR to CA server
   #################################################
   - name: Copy CSR to CA server
