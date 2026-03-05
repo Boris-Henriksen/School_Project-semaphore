@@ -58,25 +58,56 @@
       mode: '0700'
 
   #################################################
-  # Generate Keys, CSR, and Certificates per backend
+  # Generate Private Keys
   #################################################
-  - name: Generate private key
+  - name: Generate private key per backend
     command: "openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096"
     args:
       creates: "{{ ssl_dir }}/{{ item.name }}.key"
     loop: "{{ backend_servers }}"
 
-  - name: Generate CSR with SAN
+  #################################################
+  # Generate CSR with SAN
+  #################################################
+  - name: Create temporary OpenSSL config for SAN
+    copy:
+      dest: "{{ ssl_dir }}/{{ item.name }}_openssl.cnf"
+      content: |
+        [req]
+        default_bits = 4096
+        prompt = no
+        default_md = sha256
+        distinguished_name = dn
+        req_extensions = v3_req
+
+        [dn]
+        C = DK
+        ST = Denmark
+        O = dk-prod.lan
+        CN = {{ item.name }}.dk-prod.lan
+
+        [v3_req]
+        subjectAltName = @alt_names
+
+        [alt_names]
+        DNS.1 = {{ item.name }}.dk-prod.lan
+    loop: "{{ backend_servers }}"
+    loop_control:
+      label: "{{ item.name }}"
+
+  - name: Generate CSR using OpenSSL config
     command: >
       openssl req -new
       -key {{ ssl_dir }}/{{ item.name }}.key
       -out {{ ssl_dir }}/{{ item.name }}.csr
-      -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ item.name }}.dk-prod.lan"
-      -addext "subjectAltName=DNS:{{ item.name }}.dk-prod.lan"
-    args:
-      creates: "{{ ssl_dir }}/{{ item.name }}.csr"
+      -config {{ ssl_dir }}/{{ item.name }}_openssl.cnf
     loop: "{{ backend_servers }}"
+    loop_control:
+      label: "{{ item.name }}"
 
+  #################################################
+  # Copy CSR to CA server
+  #################################################
   - name: Copy CSR to CA server
     copy:
       src: "{{ ssl_dir }}/{{ item.name }}.csr"
@@ -84,7 +115,12 @@
       remote_src: yes
     delegate_to: "{{ ca_host }}"
     loop: "{{ backend_servers }}"
+    loop_control:
+      label: "{{ item.name }}"
 
+  #################################################
+  # Sign CSR on CA server
+  #################################################
   - name: Sign CSR on CA server
     command: >
       openssl x509 -req
@@ -100,7 +136,12 @@
     args:
       creates: "{{ ca_dir }}/{{ item.name }}.crt"
     loop: "{{ backend_servers }}"
+    loop_control:
+      label: "{{ item.name }}"
 
+  #################################################
+  # Copy signed certificate back to reverse proxy
+  #################################################
   - name: Copy signed certificate back
     copy:
       src: "{{ ca_dir }}/{{ item.name }}.crt"
@@ -109,6 +150,8 @@
       remote_src: yes
     delegate_to: "{{ ca_host }}"
     loop: "{{ backend_servers }}"
+    loop_control:
+      label: "{{ item.name }}"
 
   #################################################
   # Configure NGINX per backend
@@ -135,6 +178,8 @@
             }
         }
     loop: "{{ backend_servers }}"
+    loop_control:
+      label: "{{ item.name }}"
 
   - name: Enable NGINX site
     file:
@@ -143,6 +188,8 @@
       state: link
       force: yes
     loop: "{{ backend_servers }}"
+    loop_control:
+      label: "{{ item.name }}"
 
   - name: Restart NGINX
     service:
