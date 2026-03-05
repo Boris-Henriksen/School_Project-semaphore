@@ -1,0 +1,84 @@
+---
+- name: Deploy Multi-Backend Reverse Proxy with CA Signing
+  hosts: reverseproxy
+  become: yes
+  vars:
+    ca_host: 10.20.10.102
+    ca_dir: /opt/lab-ca
+    ssl_dir: /etc/nginx/ssl
+    root_ca_name: rootCA
+    domain_suffix: "dk-prod.lan"
+    
+    # Listen over dine backends
+    services:
+      - { name: "proxmox-node1", ip: "10.20.10.11", port: 8006, proto: "https" }
+      - { name: "proxmox-node2", ip: "10.20.10.12", port: 8006, proto: "https" }
+      - { name: "proxmox-node3", ip: "10.20.10.13", port: 8006, proto: "https" }
+      - { name: "zabbix", ip: "10.20.10.101", port: 80, proto: "http" }
+      - { name: "ipam", ip: "10.20.10.103", port: 80, proto: "http" }
+      - { name: "pbx", ip: "10.20.10.113", port: 80, proto: "http" }
+      - { name: "log", ip: "10.20.10.109", port: 80, proto: "http" }
+      - { name: "webmin", ip: "10.20.10.115", port: 10000, proto: "https" }
+      - { name: "web", ip: "10.20.10.110", port: 80, proto: "http" }
+      - { name: "semaphore", ip: "10.20.10.28", port: 3000, proto: "http" }
+
+  tasks:
+    - name: Install Nginx and OpenSSL
+      apt:
+        name: [nginx, openssl, ca-certificates]
+        state: present
+
+    - name: Create SSL directory
+      file:
+        path: "{{ ssl_dir }}"
+        state: directory
+        mode: '0700'
+
+    #################################################
+    # SSL CERTIFICATE LOOP
+    #################################################
+
+    - name: Generate Keys, CSRs and Sign Certificates
+      include_tasks: inner_ssl_tasks.yml
+      loop: "{{ services }}"
+      loop_control:
+        loop_var: service
+
+    #################################################
+    # NGINX CONFIGURATION
+    #################################################
+
+    - name: Create Nginx configurations
+      copy:
+        dest: "/etc/nginx/sites-available/{{ item.name }}"
+        content: |
+          server {
+              listen 443 ssl;
+              server_name {{ item.name }}.{{ domain_suffix }};
+
+              ssl_certificate {{ ssl_dir }}/{{ item.name }}.crt;
+              ssl_certificate_key {{ ssl_dir }}/{{ item.name }}.key;
+
+              location / {
+                  proxy_pass {{ item.proto }}://{{ item.ip }}:{{ item.port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_ssl_verify off; # Vigtigt for Proxmox/Webmin selv-signerede certs
+              }
+          }
+      loop: "{{ services }}"
+
+    - name: Enable Nginx sites
+      file:
+        src: "/etc/nginx/sites-available/{{ item.name }}"
+        dest: "/etc/nginx/sites-enabled/{{ item.name }}"
+        state: link
+      loop: "{{ services }}"
+      notify: Restart Nginx
+
+  handlers:
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
