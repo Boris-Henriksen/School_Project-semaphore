@@ -62,6 +62,7 @@
     copy:
       src: "{{ ssl_dir }}/reverseproxy.csr"
       dest: "{{ ca_dir }}/reverseproxy.csr"
+      remote_src: yes
     delegate_to: "{{ ca_host }}"
 
   - name: Sign certificate using CA config and v3_server
