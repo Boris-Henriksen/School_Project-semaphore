@@ -1,35 +1,61 @@
 ---
 - name: Webmin Reverse Proxy SSL Setup
-  hosts: reverseproxy_group  # avoid collision with host name
+  hosts: reverseproxy
   become: yes
+  gather_facts: yes
+
   vars:
+    ca_host: 10.20.10.102
+    ca_dir: /opt/lab-ca
     ssl_dir: /etc/nginx/ssl
-    ca_dir: /etc/ssl/ca
+    root_ca_name: rootCA
+
     backend_servers:
-      - { name: proxmox-node1, ip: 10.20.10.11 }
-      - { name: proxmox-node2, ip: 10.20.10.12 }
-      - { name: proxmox-node3, ip: 10.20.10.13 }
-      - { name: zabbix, ip: 10.20.10.101 }
-      - { name: ipam, ip: 10.20.10.103 }
-      - { name: pbx, ip: 10.20.10.113 }
-      - { name: log, ip: 10.20.10.109 }
-      - { name: webmin, ip: 10.20.10.115 }
-      - { name: web, ip: 10.20.10.110 }
-      - { name: semaphore, ip: 10.20.10.28 }
-    ca_host: ca-server   # your CA host
+      - name: proxmox-node1
+        ip: 10.20.10.11
+      - name: proxmox-node2
+        ip: 10.20.10.12
+      - name: proxmox-node3
+        ip: 10.20.10.13
+      - name: zabbix
+        ip: 10.20.10.101
+      - name: ipam
+        ip: 10.20.10.103
+      - name: pbx
+        ip: 10.20.10.113
+      - name: log
+        ip: 10.20.10.109
+      - name: webmin
+        ip: 10.20.10.115
+      - name: web
+        ip: 10.20.10.110
+      - name: semaphore
+        ip: 10.20.10.28
 
   tasks:
 
-    - name: Ensure SSL directory exists
+    - name: Install required packages
+      apt:
+        name:
+          - nginx
+          - openssl
+          - ca-certificates
+          - wget
+          - perl
+        state: present
+        update_cache: yes
+
+    - name: Create SSL directory
       file:
         path: "{{ ssl_dir }}"
         state: directory
-        mode: "0755"
+        mode: '0700'
 
     - name: Generate private key per backend
-      openssl_privatekey:
-        path: "{{ ssl_dir }}/{{ item.name }}.key"
-        size: 2048
+      command: >
+        openssl genrsa -out {{ ssl_dir }}/{{ item.name }}.key 4096
+      args:
+        creates: "{{ ssl_dir }}/{{ item.name }}.key"
       loop: "{{ backend_servers }}"
       loop_control:
         label: "{{ item.name }}"
@@ -40,18 +66,32 @@
         content: |
           [ req ]
           distinguished_name = req_distinguished_name
+          req_extensions = v3_req
           prompt = no
+
           [ req_distinguished_name ]
-          CN = {{ item.name }}.{{ ansible_domain | default('local') }}
+          C = DK
+          ST = Denmark
+          O = dk-prod.lan
+          CN = {{ item.name }}.dk-prod.lan
+
+          [ v3_req ]
+          subjectAltName = @alt_names
+
+          [ alt_names ]
+          DNS.1 = {{ item.name }}.dk-prod.lan
       loop: "{{ backend_servers }}"
       loop_control:
         label: "{{ item.name }}"
 
     - name: Generate CSR per backend
-      openssl_csr:
-        path: "{{ ssl_dir }}/{{ item.name }}.csr"
-        privatekey_path: "{{ ssl_dir }}/{{ item.name }}.key"
-        common_name: "{{ item.name }}.{{ ansible_domain | default('local') }}"
+      command: >
+        openssl req -new
+        -key {{ ssl_dir }}/{{ item.name }}.key
+        -out {{ ssl_dir }}/{{ item.name }}.csr
+        -config {{ ssl_dir }}/{{ item.name }}_openssl.cnf
+      args:
+        creates: "{{ ssl_dir }}/{{ item.name }}.csr"
       loop: "{{ backend_servers }}"
       loop_control:
         label: "{{ item.name }}"
@@ -61,35 +101,91 @@
         src: "{{ ssl_dir }}/{{ item.name }}.csr"
         dest: "{{ ca_dir }}/{{ item.name }}.csr"
         remote_src: yes
-      delegate_to: "{{ ca_host }}"
       loop: "{{ backend_servers }}"
       loop_control:
         label: "{{ item.name }}"
+      delegate_to: "{{ ca_host }}"
 
     - name: Sign CSR on CA server
       command: >
-        openssl x509 -req -in {{ ca_dir }}/{{ item.name }}.csr
-        -CA {{ ca_dir }}/ca.crt -CAkey {{ ca_dir }}/ca.key -CAcreateserial
-        -out {{ ca_dir }}/{{ item.name }}.crt -days 365 -sha256
-      delegate_to: "{{ ca_host }}"
+        openssl x509 -req
+        -in {{ ca_dir }}/{{ item.name }}.csr
+        -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+        -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
+        -CAcreateserial
+        -out {{ ca_dir }}/{{ item.name }}.crt
+        -days 825
+        -sha256
+        -copy_extensions copy
+      args:
+        creates: "{{ ca_dir }}/{{ item.name }}.crt"
       loop: "{{ backend_servers }}"
       loop_control:
         label: "{{ item.name }}"
+      delegate_to: "{{ ca_host }}"
 
-    - name: Copy signed certificate back to reverseproxy
-      copy:
+    - name: Retrieve signed certificates from CA
+      fetch:
         src: "{{ ca_dir }}/{{ item.name }}.crt"
         dest: "{{ ssl_dir }}/{{ item.name }}.crt"
-        remote_src: yes
+        flat: yes
+      loop: "{{ backend_servers }}"
+      loop_control:
+        label: "{{ item.name }}"
       delegate_to: "{{ ca_host }}"
+
+    - name: Configure NGINX reverse proxy per backend
+      copy:
+        dest: "/etc/nginx/sites-available/{{ item.name }}"
+        content: |
+          server {
+              listen 443 ssl;
+              server_name {{ item.name }}.dk-prod.lan;
+
+              ssl_certificate {{ ssl_dir }}/{{ item.name }}.crt;
+              ssl_certificate_key {{ ssl_dir }}/{{ item.name }}.key;
+
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_prefer_server_ciphers on;
+
+              location / {
+                  proxy_pass http://{{ item.ip }}:80;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              }
+          }
       loop: "{{ backend_servers }}"
       loop_control:
         label: "{{ item.name }}"
 
-    - name: List generated SSL files
-      command: ls -l "{{ ssl_dir }}"
-      register: ssl_list
+    - name: Enable NGINX sites
+      file:
+        src: "/etc/nginx/sites-available/{{ item.name }}"
+        dest: "/etc/nginx/sites-enabled/{{ item.name }}"
+        state: link
+        force: yes
+      loop: "{{ backend_servers }}"
+      loop_control:
+        label: "{{ item.name }}"
 
-    - name: Show SSL files
-      debug:
-        var: ssl_list.stdout_lines
+    - name: Restart NGINX
+      service:
+        name: nginx
+        state: restarted
+        enabled: yes
+
+    - name: Download Webmin
+      get_url:
+        url: https://prdownloads.sourceforge.net/webadmin/webmin_2.105_all.deb
+        dest: /tmp/webmin.deb
+
+    - name: Install Webmin
+      apt:
+        deb: /tmp/webmin.deb
+
+    - name: Ensure Webmin running
+      service:
+        name: webmin
+        state: started
+        enabled: yes
