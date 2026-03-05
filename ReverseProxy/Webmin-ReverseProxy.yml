@@ -71,7 +71,7 @@
   #################################################
   # Create OpenSSL Config per backend
   #################################################
-  - name: Create temporary OpenSSL config per backend
+  - name: Create OpenSSL config per backend
     copy:
       dest: "{{ ssl_dir }}/{{ item.name }}_openssl.cnf"
       content: |
@@ -100,15 +100,28 @@
   #################################################
   # Generate CSR per backend
   #################################################
-  - name: Generate CSR using OpenSSL config
+  - name: Generate CSR per backend
     command: >
       openssl req -new
       -key {{ ssl_dir }}/{{ item.name }}.key
       -out {{ ssl_dir }}/{{ item.name }}.csr
       -config {{ ssl_dir }}/{{ item.name }}_openssl.cnf
+    args:
+      creates: "{{ ssl_dir }}/{{ item.name }}.csr"
     loop: "{{ backend_servers }}"
     loop_control:
       label: "{{ item.name }}"
+
+  #################################################
+  # Verify CSR files exist before copying
+  #################################################
+  - name: List generated CSRs
+    command: ls -l {{ ssl_dir }}/
+    register: csr_list
+
+  - name: Show CSR files
+    debug:
+      var: csr_list.stdout_lines
 
   #################################################
   # Copy CSR to CA server
