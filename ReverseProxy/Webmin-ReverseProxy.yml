@@ -1,5 +1,5 @@
 ---
-- name: Deploy Reverse Proxy with SAN for All Backends
+- name: Deploy Reverse Proxy with SAN for Multiple Backends
   hosts: reverseproxy
   become: yes
   gather_facts: yes
@@ -10,7 +10,8 @@
     ssl_dir: /etc/nginx/ssl
     root_ca_name: rootCA
     backend_port: 80
-    # List of backend servers: name + IP
+
+    # Define your backends here
     backends:
       - name: proxmox-node1
         ip: 10.20.10.11
@@ -33,11 +34,9 @@
       - name: semaphore
         ip: 10.20.10.28
 
-    # Compute domains list: "<name>.dk-prod.lan"
-    backend_domains: "{{ backends | sort(attribute='ip') | map(attribute='name') | map('regex_replace', '(.*)', '\\1.dk-prod.lan') | list }}"
-
-    # Main certificate CN / server_name
-    domain_name: "{{ backend_domains[0] }}"
+  vars_files:
+    # optional, if you want to store secrets
+    # - secrets.yml
 
   tasks:
 
@@ -65,6 +64,14 @@
       mode: '0700'
 
   #################################################
+  # Sort backends and build domain list
+  #################################################
+  - name: Sort backends by last octet
+    set_fact:
+      sorted_backends: "{{ backends | sort(attribute='ip') }}"
+      backend_domains: "{{ sorted_backends | map(attribute='name') | map('regex_replace', '(.*)', '\\1.dk-prod.lan') | list }}"
+
+  #################################################
   # Generate Private Key
   #################################################
   - name: Generate private key
@@ -74,11 +81,11 @@
       creates: "{{ ssl_dir }}/reverseproxy.key"
 
   #################################################
-  # Create OpenSSL SAN Config
+  # Generate OpenSSL SAN config
   #################################################
   - name: Create OpenSSL SAN config
     copy:
-      dest: "{{ ssl_dir }}/san.cnf"
+      dest: "{{ ssl_dir }}/reverseproxy_san.cnf"
       content: |
         [ req ]
         default_bits       = 4096
@@ -91,25 +98,25 @@
         C  = DK
         ST = Denmark
         O  = dk-prod.lan
-        CN = {{ domain_name }}
+        CN = {{ backend_domains[0] }}
 
         [ v3_req ]
         subjectAltName = @alt_names
 
         [ alt_names ]
-        {% for domain in backend_domains %}
-        DNS.{{ loop.index }} = {{ domain }}
-        {% endfor %}
+{% for idx, domain in backend_domains | dictsort %}
+DNS.{{ idx+1 }} = {{ domain }}
+{% endfor %}
 
   #################################################
-  # Generate CSR WITH SAN
+  # Generate CSR with SAN
   #################################################
   - name: Generate CSR with SAN
     command: >
       openssl req -new
       -key {{ ssl_dir }}/reverseproxy.key
       -out {{ ssl_dir }}/reverseproxy.csr
-      -config {{ ssl_dir }}/san.cnf
+      -config {{ ssl_dir }}/reverseproxy_san.cnf
     args:
       creates: "{{ ssl_dir }}/reverseproxy.csr"
 
@@ -128,7 +135,7 @@
     delegate_to: "{{ ca_host }}"
 
   #################################################
-  # Sign Certificate (copy SAN)
+  # Sign certificate using root CA
   #################################################
   - name: Sign certificate using root CA
     command: >
@@ -167,9 +174,15 @@
     copy:
       dest: /etc/nginx/sites-available/reverseproxy
       content: |
+        upstream backends {
+{% for backend in sorted_backends %}
+            server {{ backend.ip }}:{{ backend_port }};
+{% endfor %}
+        }
+
         server {
             listen 443 ssl;
-            server_name {{ domain_name }};
+            server_name {{ backend_domains | join(' ') }};
 
             ssl_certificate {{ ssl_dir }}/reverseproxy.crt;
             ssl_certificate_key {{ ssl_dir }}/reverseproxy.key;
@@ -178,7 +191,7 @@
             ssl_prefer_server_ciphers on;
 
             location / {
-                proxy_pass http://{{ backend_ip }}:{{ backend_port }};
+                proxy_pass http://backends;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
                 proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -199,11 +212,34 @@
       enabled: yes
 
   #################################################
+  # Install Webmin
+  #################################################
+  - name: Download Webmin
+    get_url:
+      url: https://prdownloads.sourceforge.net/webadmin/webmin_2.105_all.deb
+      dest: /tmp/webmin.deb
+
+  - name: Install Webmin
+    apt:
+      deb: /tmp/webmin.deb
+
+  - name: Ensure Webmin running
+    service:
+      name: webmin
+      state: started
+      enabled: yes
+
+  #################################################
   # Done
   #################################################
   - name: Show completion message
     debug:
       msg: |
         Reverse Proxy ready:
-        CN: {{ domain_name }}
-        SANs: {{ backend_domains | join(', ') }}
+        https://{{ backend_domains | join(', ') }}
+
+        TLS terminates at reverse proxy.
+        Backend servers use HTTP only.
+
+        Webmin:
+        https://{{ backends | selectattr('name','equalto','webmin') | first | attr('ip') }}:10000
