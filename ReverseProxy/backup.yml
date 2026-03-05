@@ -1,0 +1,178 @@
+---
+- name: Deploy Reverse Proxy with Simplified CA Signing
+  hosts: reverseproxy
+  become: yes
+  gather_facts: yes
+
+  vars:
+    domain_name: zabbix.dk-prod.lan
+    ca_host: 10.20.10.102
+    ca_dir: /opt/lab-ca
+    ssl_dir: /etc/nginx/ssl
+    backend_ip: 10.20.10.101
+    backend_port: 80
+    root_ca_name: rootCA
+
+  tasks:
+
+  #################################################
+  # Install Required Packages
+  #################################################
+
+  - name: Install required packages
+    apt:
+      name:
+        - nginx
+        - openssl
+        - ca-certificates
+        - wget
+        - perl
+      state: present
+      update_cache: yes
+
+  #################################################
+  # Generate Private Key and CSR
+  #################################################
+
+  - name: Create SSL directory
+    file:
+      path: "{{ ssl_dir }}"
+      state: directory
+      mode: '0700'
+
+  - name: Generate private key
+    command: >
+      openssl genrsa -out {{ ssl_dir }}/reverseproxy.key 4096
+    args:
+      creates: "{{ ssl_dir }}/reverseproxy.key"
+
+  - name: Generate CSR
+    command: >
+      openssl req -new
+      -key {{ ssl_dir }}/reverseproxy.key
+      -out {{ ssl_dir }}/reverseproxy.csr
+      -subj "/C=DK/ST=Denmark/O=dk-prod.lan/CN={{ domain_name }}"
+    args:
+      creates: "{{ ssl_dir }}/reverseproxy.csr"
+
+  #################################################
+  # Transfer CSR to CA Server
+  #################################################
+
+  - name: Read CSR from reverse proxy
+    slurp:
+      src: "{{ ssl_dir }}/reverseproxy.csr"
+    register: csr_file
+
+  - name: Write CSR to CA server
+    copy:
+      content: "{{ csr_file.content | b64decode }}"
+      dest: "{{ ca_dir }}/reverseproxy.csr"
+    delegate_to: "{{ ca_host }}"
+
+  #################################################
+  # Sign CSR Using Root CA (openssl x509 method)
+  #################################################
+
+  - name: Sign certificate using root CA
+    command: >
+      openssl x509 -req
+      -in {{ ca_dir }}/reverseproxy.csr
+      -CA {{ ca_dir }}/certs/{{ root_ca_name }}.crt
+      -CAkey {{ ca_dir }}/private/{{ root_ca_name }}.key
+      -CAcreateserial
+      -out {{ ca_dir }}/reverseproxy.crt
+      -days 825
+      -sha256
+    delegate_to: "{{ ca_host }}"
+    args:
+      creates: "{{ ca_dir }}/reverseproxy.crt"
+
+  #################################################
+  # Retrieve Signed Certificate
+  #################################################
+
+  - name: Read signed certificate from CA
+    slurp:
+      src: "{{ ca_dir }}/reverseproxy.crt"
+    delegate_to: "{{ ca_host }}"
+    register: signed_cert
+
+  - name: Install signed certificate on reverse proxy
+    copy:
+      content: "{{ signed_cert.content | b64decode }}"
+      dest: "{{ ssl_dir }}/reverseproxy.crt"
+      mode: '0600'
+
+  #################################################
+  # Configure NGINX (TLS termination only)
+  #################################################
+
+  - name: Configure NGINX reverse proxy
+    copy:
+      dest: /etc/nginx/sites-available/reverseproxy
+      content: |
+        server {
+            listen 443 ssl;
+            server_name {{ domain_name }};
+
+            ssl_certificate {{ ssl_dir }}/reverseproxy.crt;
+            ssl_certificate_key {{ ssl_dir }}/reverseproxy.key;
+
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_prefer_server_ciphers on;
+
+            location / {
+                proxy_pass http://{{ backend_ip }}:{{ backend_port }};
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+        }
+
+  - name: Enable NGINX site
+    file:
+      src: /etc/nginx/sites-available/reverseproxy
+      dest: /etc/nginx/sites-enabled/reverseproxy
+      state: link
+
+  - name: Restart NGINX
+    service:
+      name: nginx
+      state: restarted
+      enabled: yes
+
+  #################################################
+  # Install Webmin
+  #################################################
+
+  - name: Download Webmin
+    get_url:
+      url: https://prdownloads.sourceforge.net/webadmin/webmin_2.105_all.deb
+      dest: /tmp/webmin.deb
+
+  - name: Install Webmin
+    apt:
+      deb: /tmp/webmin.deb
+
+  - name: Ensure Webmin running
+    service:
+      name: webmin
+      state: started
+      enabled: yes
+
+  #################################################
+  # Done
+  #################################################
+
+  - name: Show completion message
+    debug:
+      msg: |
+        Reverse Proxy ready:
+        https://{{ domain_name }}
+
+        TLS terminates at reverse proxy.
+        Backend servers use HTTP only.
+
+        Webmin:
+        https://10.20.10.115:10000
