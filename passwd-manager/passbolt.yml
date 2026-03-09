@@ -5,7 +5,7 @@
   vars:
     db_name: "passbolt"
     db_user: "passboltadmin"
-    db_password: "Merc1234!" # <--- HUSK AT SKIFTE
+    db_password: "SkiftMigNu123!" # <--- HUSK AT SKIFTE
     mysql_root_password: "Merc1234!"
     server_name: "passbolt.dk-prod.lan" # <--- Dit DNS navn (som peger på din proxy)
     install_dir: "/var/www/passbolt"
@@ -92,13 +92,12 @@
         recurse: yes
 
     - name: Install Composer dependencies
-      ansible.builtin.become: yes
-      ansible.builtin.become_user: www-data
       ansible.builtin.shell:
         cmd: composer install --no-dev --optimize-autoloader
         chdir: "{{ install_dir }}"
-      args:
         creates: "{{ install_dir }}/vendor"
+      become: yes
+      become_user: www-data
 
     - name: Configure PHP timezone
       ansible.builtin.lineinfile:
@@ -125,7 +124,6 @@
                   include snippets/fastcgi-php.conf;
                   fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
                   
-                  # Proxy settings for Passbolt HTTPS detection
                   fastcgi_param HTTPS on;
                   fastcgi_param HTTP_X_FORWARDED_PROTO https;
               }
