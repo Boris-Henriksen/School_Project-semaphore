@@ -3,11 +3,13 @@
   hosts: passbolt
   become: true
   vars:
+    # Vi lægger URL'en her for at undgå parsing-fejl i shell-modulet
+    passbolt_repo_url: "https://github.com"
     db_name: "passbolt"
     db_user: "passboltadmin"
-    db_password: "SkiftMigNu123!" # <--- HUSK AT SKIFTE
+    db_password: "SkiftMigNu123!"
     mysql_root_password: "Merc1234!"
-    server_name: "passbolt.dk-prod.lan" # <--- Dit DNS navn
+    server_name: "passbolt.dk-prod.lan"
     install_dir: "/var/www/passbolt"
     php_timezone: "Europe/Copenhagen"
 
@@ -77,9 +79,10 @@
         login_user: root
         login_password: "{{ mysql_root_password }}"
 
-    - name: Clone Passbolt CE repository (via shell for robustness)
-      ansible.builtin.shell:
-        cmd: "git clone https://github.com {{ install_dir }}"
+    - name: Clone Passbolt CE repository
+      ansible.builtin.shell: 
+        cmd: "git clone {{ passbolt_repo_url }} {{ install_dir }}"
+      args:
         creates: "{{ install_dir }}/bin/cake"
 
     - name: Set ownership for Install Directory
@@ -93,9 +96,10 @@
       ansible.builtin.shell:
         cmd: composer install --no-dev --optimize-autoloader
         chdir: "{{ install_dir }}"
-        creates: "{{ install_dir }}/vendor"
       become: yes
       become_user: www-data
+      args:
+        creates: "{{ install_dir }}/vendor"
 
     - name: Configure PHP timezone
       ansible.builtin.lineinfile:
@@ -121,13 +125,8 @@
               location ~ \.php$ {
                   include snippets/fastcgi-php.conf;
                   fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
-                  
                   fastcgi_param HTTPS on;
                   fastcgi_param HTTP_X_FORWARDED_PROTO https;
-              }
-
-              location ~ /\.ht {
-                  deny all;
               }
           }
       notify: Restart Nginx
