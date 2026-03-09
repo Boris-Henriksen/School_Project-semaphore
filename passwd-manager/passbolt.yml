@@ -1,5 +1,5 @@
 ---
-- name: Setup Passbolt CE Server
+- name: Install Passbolt CE (Fast Release Method)
   hosts: passbolt
   become: true
 
@@ -11,11 +11,13 @@
 
     server_name: passbolt.dk-prod.lan
     install_dir: /var/www/passbolt
-
     php_timezone: Europe/Copenhagen
 
   tasks:
 
+  # --------------------------------
+  # Install base packages
+  # --------------------------------
   - name: Update apt cache
     ansible.builtin.apt:
       update_cache: yes
@@ -26,10 +28,9 @@
         - nginx
         - mariadb-server
         - python3-pymysql
-        - git
-        - unzip
-        - composer
         - gnupg
+        - unzip
+        - curl
 
         - php-fpm
         - php-cli
@@ -42,10 +43,12 @@
         - php-intl
         - php-zip
         - php-bcmath
-
       state: present
 
-  - name: Get PHP version
+  # --------------------------------
+  # Detect PHP version
+  # --------------------------------
+  - name: Detect PHP version
     ansible.builtin.command: php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"
     register: php_version_raw
     changed_when: false
@@ -54,6 +57,9 @@
     ansible.builtin.set_fact:
       php_version: "{{ php_version_raw.stdout }}"
 
+  # --------------------------------
+  # Start required services
+  # --------------------------------
   - name: Start services
     ansible.builtin.service:
       name: "{{ item }}"
@@ -64,6 +70,9 @@
       - mariadb
       - "php{{ php_version }}-fpm"
 
+  # --------------------------------
+  # Configure MariaDB
+  # --------------------------------
   - name: Set MariaDB root password
     community.mysql.mysql_user:
       name: root
@@ -78,7 +87,7 @@
       login_user: root
       login_password: "{{ mysql_root_password }}"
 
-  - name: Create Passbolt database user
+  - name: Create Passbolt DB user
     community.mysql.mysql_user:
       name: "{{ db_user }}"
       password: "{{ db_password }}"
@@ -87,11 +96,23 @@
       login_user: root
       login_password: "{{ mysql_root_password }}"
 
-  - name: Clone Passbolt repository
-    ansible.builtin.git:
-      repo: https://github.com/passbolt/passbolt_api.git
-      dest: "{{ install_dir }}"
-      version: master
+  # --------------------------------
+  # Download and extract Passbolt
+  # --------------------------------
+  - name: Download Passbolt release
+    ansible.builtin.get_url:
+      url: https://github.com/passbolt/passbolt_api/releases/latest/download/passbolt-ce-latest.tar.gz
+      dest: /tmp/passbolt.tar.gz
+
+  - name: Extract Passbolt
+    ansible.builtin.unarchive:
+      src: /tmp/passbolt.tar.gz
+      dest: /var/www/
+      remote_src: yes
+
+  - name: Rename extracted folder
+    ansible.builtin.command:
+      cmd: mv /var/www/passbolt-ce-* {{ install_dir }}
 
   - name: Set permissions
     ansible.builtin.file:
@@ -100,19 +121,9 @@
       group: www-data
       recurse: yes
 
-  - name: Install Composer dependencies (Optimized)
-    ansible.builtin.shell:
-      cmd: "php -d memory_limit=-1 /usr/bin/composer install --no-dev --optimize-autoloader --no-interaction"
-      chdir: "{{ install_dir }}"
-    become: yes
-    become_user: www-data
-    args:
-      creates: "{{ install_dir }}/vendor"
-    environment:
-      COMPOSER_ALLOW_SUPERUSER: "1"
-      COMPOSER_NO_INTERACTION: "1"
-
-
+  # --------------------------------
+  # Configure PHP
+  # --------------------------------
   - name: Configure PHP timezone
     ansible.builtin.lineinfile:
       path: "/etc/php/{{ php_version }}/fpm/php.ini"
@@ -120,6 +131,9 @@
       line: "date.timezone = {{ php_timezone }}"
     notify: Restart PHP
 
+  # --------------------------------
+  # Configure Nginx for reverse proxy
+  # --------------------------------
   - name: Configure Nginx
     ansible.builtin.copy:
       dest: /etc/nginx/sites-available/passbolt
@@ -138,13 +152,17 @@
             location ~ \.php$ {
                 include snippets/fastcgi-php.conf;
                 fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
+
+                # Required for reverse proxy
                 fastcgi_param HTTPS on;
+                fastcgi_param HTTP_X_FORWARDED_PROTO https;
             }
 
             location ~ /\.ht {
                 deny all;
             }
         }
+    notify: Restart Nginx
 
   - name: Enable Passbolt site
     ansible.builtin.file:
@@ -157,14 +175,16 @@
       path: /etc/nginx/sites-enabled/default
       state: absent
 
-  - name: Restart nginx
-    ansible.builtin.service:
-      name: nginx
-      state: restarted
-
+  # --------------------------------
+  # Handlers
+  # --------------------------------
   handlers:
+    - name: Restart Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
 
-  - name: Restart PHP
-    ansible.builtin.service:
-      name: "php{{ php_version }}-fpm"
-      state: restarted
+    - name: Restart PHP
+      ansible.builtin.service:
+        name: "php{{ php_version }}-fpm"
+        state: restarted
