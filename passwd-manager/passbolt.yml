@@ -100,12 +100,18 @@
       group: www-data
       recurse: yes
 
-  - name: Install composer dependencies
-    ansible.builtin.command:
-      cmd: composer install --no-dev --optimize-autoloader
+  - name: Install Composer dependencies (Optimized)
+    ansible.builtin.shell:
+      cmd: "php -d memory_limit=-1 /usr/bin/composer install --no-dev --optimize-autoloader --no-interaction"
       chdir: "{{ install_dir }}"
+    become: yes
+    become_user: www-data
     args:
       creates: "{{ install_dir }}/vendor"
+    environment:
+      COMPOSER_ALLOW_SUPERUSER: "1"
+      COMPOSER_NO_INTERACTION: "1"
+
 
   - name: Configure PHP timezone
     ansible.builtin.lineinfile:
