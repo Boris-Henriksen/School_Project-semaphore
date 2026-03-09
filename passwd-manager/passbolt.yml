@@ -1,25 +1,27 @@
 ---
-- name: Setup Passbolt CE server med Nginx (Dynamisk PHP)
+- name: Setup Passbolt CE server (Dynamisk PHP & Proxy Ready)
   hosts: passbolt
   become: true
   vars:
     db_name: "passbolt"
     db_user: "passboltadmin"
-    db_password: "Merc1234!"
+    db_password: "Merc1234!" # <--- HUSK AT SKIFTE
     mysql_root_password: "Merc1234!"
-    server_name: "passbolt.dk-prod.lan"
+    server_name: "passbolt.dk-prod.lan" # <--- Dit DNS navn (som peger på din proxy)
     install_dir: "/var/www/passbolt"
+    php_timezone: "Europe/Copenhagen"
 
   tasks:
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
 
-    - name: Install required packages (Generic names)
+    - name: Install required packages
       ansible.builtin.apt:
         name:
           - nginx
           - mariadb-server
+          - python3-pymysql
           - php-fpm
           - php-mysql
           - php-gd
@@ -27,7 +29,7 @@
           - php-curl
           - php-mbstring
           - php-xml
-          - php-gnupg  # Specifik for Passbolt
+          - php-gnupg
           - git
           - unzip
           - composer
@@ -42,7 +44,7 @@
       ansible.builtin.set_fact:
         php_version: "{{ php_version_raw.stdout | regex_search('^([0-9]+\\.[0-9]+)') }}"
 
-    - name: Start services
+    - name: Start and enable services
       ansible.builtin.service:
         name: "{{ item }}"
         state: started
@@ -52,21 +54,22 @@
         - mariadb
         - "php{{ php_version }}-fpm"
 
-    - name: Ensure MariaDB root password
-      ansible.builtin.mysql_user:
+    - name: Set MariaDB root password
+      community.mysql.mysql_user:
         name: root
         password: "{{ mysql_root_password }}"
         login_unix_socket: /var/run/mysqld/mysqld.sock
+        check_implicit_admin: yes
 
     - name: Create Passbolt database
-      ansible.builtin.mysql_db:
+      community.mysql.mysql_db:
         name: "{{ db_name }}"
         state: present
         login_user: root
         login_password: "{{ mysql_root_password }}"
 
-    - name: Create Passbolt DB user
-      ansible.builtin.mysql_user:
+    - name: Create Passbolt database user
+      community.mysql.mysql_user:
         name: "{{ db_user }}"
         password: "{{ db_password }}"
         priv: "{{ db_name }}.*:ALL"
@@ -81,13 +84,30 @@
         version: 'master'
         force: yes
 
+    - name: Set ownership for Install Directory
+      ansible.builtin.file:
+        path: "{{ install_dir }}"
+        owner: www-data
+        group: www-data
+        recurse: yes
+
     - name: Install Composer dependencies
+      ansible.builtin.become: yes
+      ansible.builtin.become_user: www-data
       ansible.builtin.shell:
         cmd: composer install --no-dev --optimize-autoloader
         chdir: "{{ install_dir }}"
-      become_user: www-data
+      args:
+        creates: "{{ install_dir }}/vendor"
 
-    - name: Configure Nginx for Passbolt
+    - name: Configure PHP timezone
+      ansible.builtin.lineinfile:
+        path: "/etc/php/{{ php_version }}/fpm/php.ini"
+        regexp: '^;?date.timezone ='
+        line: "date.timezone = {{ php_timezone }}"
+      notify: Restart PHP-FPM
+
+    - name: Configure Nginx for Passbolt (Reverse Proxy Friendly)
       ansible.builtin.copy:
         dest: /etc/nginx/sites-available/passbolt
         content: |
@@ -104,21 +124,28 @@
               location ~ \.php$ {
                   include snippets/fastcgi-php.conf;
                   fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
+                  
+                  # Proxy settings for Passbolt HTTPS detection
+                  fastcgi_param HTTPS on;
+                  fastcgi_param HTTP_X_FORWARDED_PROTO https;
+              }
+
+              location ~ /\.ht {
+                  deny all;
               }
           }
       notify: Restart Nginx
 
-    - name: Enable site and remove default
+    - name: Enable Passbolt site
       ansible.builtin.file:
         src: /etc/nginx/sites-available/passbolt
         dest: /etc/nginx/sites-enabled/passbolt
         state: link
 
-    - name: Cleanup default Nginx
+    - name: Remove default Nginx site
       ansible.builtin.file:
         path: /etc/nginx/sites-enabled/default
         state: absent
-      notify: Restart Nginx
 
   handlers:
     - name: Restart Nginx
@@ -130,4 +157,3 @@
       ansible.builtin.service:
         name: "php{{ php_version }}-fpm"
         state: restarted
-
