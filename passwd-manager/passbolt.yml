@@ -71,37 +71,11 @@
       - "php{{ php_version }}-fpm"
 
   # --------------------------------
-  # Configure MariaDB
-  # --------------------------------
-  - name: Set MariaDB root password
-    community.mysql.mysql_user:
-      name: root
-      password: "{{ mysql_root_password }}"
-      login_unix_socket: /var/run/mysqld/mysqld.sock
-      check_implicit_admin: yes
-
-  - name: Create Passbolt database
-    community.mysql.mysql_db:
-      name: "{{ db_name }}"
-      state: present
-      login_user: root
-      login_password: "{{ mysql_root_password }}"
-
-  - name: Create Passbolt DB user
-    community.mysql.mysql_user:
-      name: "{{ db_user }}"
-      password: "{{ db_password }}"
-      priv: "{{ db_name }}.*:ALL"
-      state: present
-      login_user: root
-      login_password: "{{ mysql_root_password }}"
-
-  # --------------------------------
   # Dynamically get latest Passbolt release
   # --------------------------------
-  - name: Get list of releases from GitHub
+  - name: Get list of releases from GitHub (passbolt repo)
     ansible.builtin.uri:
-      url: "https://api.github.com/repos/passbolt/passbolt_api/releases"
+      url: "https://api.github.com/repos/passbolt/passbolt/releases"
       return_content: yes
     register: gh_releases
 
@@ -205,6 +179,32 @@
     ansible.builtin.file:
       path: /etc/nginx/sites-enabled/default
       state: absent
+
+  # --------------------------------
+  # Database installation/configuration (til sidst)
+  # --------------------------------
+  - name: Set MariaDB root password
+    community.mysql.mysql_user:
+      name: root
+      password: "{{ mysql_root_password }}"
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+      check_implicit_admin: yes
+
+  - name: Create Passbolt database
+    community.mysql.mysql_db:
+      name: "{{ db_name }}"
+      state: present
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+
+  - name: Create Passbolt DB user
+    community.mysql.mysql_user:
+      name: "{{ db_user }}"
+      password: "{{ db_password }}"
+      priv: "{{ db_name }}.*:ALL"
+      state: present
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
 
   # --------------------------------
   # Handlers
