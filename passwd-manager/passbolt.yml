@@ -7,7 +7,7 @@
     db_user: "passboltadmin"
     db_password: "SkiftMigNu123!" # <--- HUSK AT SKIFTE
     mysql_root_password: "Merc1234!"
-    server_name: "passbolt.dk-prod.lan" # <--- Dit DNS navn (som peger på din proxy)
+    server_name: "passbolt.dk-prod.lan" # <--- Dit DNS navn
     install_dir: "/var/www/passbolt"
     php_timezone: "Europe/Copenhagen"
 
@@ -77,12 +77,10 @@
         login_user: root
         login_password: "{{ mysql_root_password }}"
 
-    - name: Clone Passbolt CE repository
-      ansible.builtin.git:
-        repo: 'https://github.com'
-        dest: '{{ install_dir }}'
-        version: 'master'
-        force: yes
+    - name: Clone Passbolt CE repository (via shell for robustness)
+      ansible.builtin.shell:
+        cmd: "git clone https://github.com {{ install_dir }}"
+        creates: "{{ install_dir }}/bin/cake"
 
     - name: Set ownership for Install Directory
       ansible.builtin.file:
