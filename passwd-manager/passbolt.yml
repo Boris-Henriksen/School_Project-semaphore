@@ -1,84 +1,185 @@
 ---
-- name: Install Passbolt CE server (official installer)
+- name: Install Passbolt CE on Ubuntu 24.04
   hosts: passbolt
   become: true
   vars:
-    db_name: passbolt
-    db_user: passboltadmin
-    db_password: "Merc1234!"
-    mysql_root_password: "Merc1234!"
-    server_name: passbolt.dk-prod.lan
-    php_timezone: "Europe/Copenhagen"
-    # Distributions argument for installer: focal (Ubuntu 20.04/22.04)
-    passbolt_dist: "focal"
+    passbolt_version: "5.9.1"   # Kan ændres til seneste stabil
+    passbolt_install_dir: "/var/www/passbolt"
+    db_name: "passbolt"
+    db_user: "passbolt"
+    db_password: "Passw0rd123!"   # Skift til noget sikkert
 
   tasks:
-    - name: Update apt cache
-      ansible.builtin.apt:
-        update_cache: yes
 
-    - name: Install prerequisites
-      ansible.builtin.apt:
-        name:
-          - curl
-          - gnupg
-          - lsb-release
-          - ca-certificates
-          - wget
-        state: present
+  - name: Update apt cache
+    apt:
+      update_cache: yes
+      upgrade: dist
 
-    - name: Download Passbolt installer script
-      ansible.builtin.get_url:
-        url: "https://download.passbolt.com/ce/installer/passbolt-repo-setup.ce.sh"
-        dest: "/tmp/passbolt-repo-setup.ce.sh"
-        mode: "0755"
+  - name: Install base packages
+    apt:
+      name:
+        - curl
+        - wget
+        - gnupg
+        - lsb-release
+        - software-properties-common
+        - unzip
+      state: present
 
-    - name: Download SHA512 sum for installer
-      ansible.builtin.get_url:
-        url: "https://github.com/passbolt/passbolt-dep-scripts/releases/latest/download/passbolt-ce-SHA512SUM.txt"
-        dest: "/tmp/passbolt-ce-SHA512SUM.txt"
+  - name: Add PHP repository
+    ansible.builtin.shell: |
+      add-apt-repository ppa:ondrej/php -y
+      apt update
+    args:
+      warn: false
 
-    - name: Verify installer checksum
-      ansible.builtin.command:
-        cmd: "sha512sum -c /tmp/passbolt-ce-SHA512SUM.txt"
-      args:
-        chdir: /tmp
+  - name: Install PHP 8.2 + extensions
+    apt:
+      name:
+        - php8.2-cli
+        - php8.2-fpm
+        - php8.2-mysql
+        - php8.2-gd
+        - php8.2-mbstring
+        - php8.2-curl
+        - php8.2-xml
+        - php8.2-zip
+        - php8.2-intl
+        - php8.2-bcmath
+        - php8.2-gmp
+      state: present
 
-    - name: Run Passbolt repo installer script
-      ansible.builtin.shell: >
-        DEBIAN_FRONTEND=noninteractive bash /tmp/passbolt-repo-setup.ce.sh {{ passbolt_dist }}
-      environment:
-        DEBIAN_FRONTEND: noninteractive
+  - name: Install MariaDB server
+    apt:
+      name:
+        - mariadb-server
+      state: present
 
-    - name: Update apt cache after adding repo
-      ansible.builtin.apt:
-        update_cache: yes
+  - name: Ensure MariaDB is running
+    service:
+      name: mariadb
+      state: started
+      enabled: yes
 
-    - name: Install Passbolt CE Server
-      ansible.builtin.apt:
-        name: passbolt-ce-server
-        state: present
+  - name: Create Passbolt database
+    mysql_db:
+      name: "{{ db_name }}"
+      state: present
 
-    # MariaDB setup at end
-    - name: Set MariaDB root password
-      community.mysql.mysql_user:
-        name: root
-        password: "{{ mysql_root_password }}"
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        check_implicit_admin: yes
+  - name: Create Passbolt database user
+    mysql_user:
+      name: "{{ db_user }}"
+      password: "{{ db_password }}"
+      priv: "{{ db_name }}.*:ALL"
+      host: "localhost"
+      state: present
 
-    - name: Create Passbolt database
-      community.mysql.mysql_db:
-        name: "{{ db_name }}"
-        state: present
-        login_user: root
-        login_password: "{{ mysql_root_password }}"
+  - name: Install nginx
+    apt:
+      name: nginx
+      state: present
 
-    - name: Create Passbolt DB user
-      community.mysql.mysql_user:
-        name: "{{ db_user }}"
-        password: "{{ db_password }}"
-        priv: "{{ db_name }}.*:ALL"
-        state: present
-        login_user: root
-        login_password: "{{ mysql_root_password }}"
+  - name: Create nginx config for Passbolt
+    copy:
+      dest: /etc/nginx/sites-available/passbolt
+      content: |
+        server {
+            listen 80;
+            server_name passbolt.local;
+
+            root {{ passbolt_install_dir }}/webroot;
+            index index.php;
+
+            location / {
+                try_files $uri $uri/ /index.php?$args;
+            }
+
+            location ~ \.php$ {
+                include snippets/fastcgi-php.conf;
+                fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+            }
+
+            location ~ /\.ht {
+                deny all;
+            }
+        }
+
+  - name: Enable nginx site
+    file:
+      src: /etc/nginx/sites-available/passbolt
+      dest: /etc/nginx/sites-enabled/passbolt
+      state: link
+
+  - name: Remove default nginx site
+    file:
+      path: /etc/nginx/sites-enabled/default
+      state: absent
+
+  - name: Restart nginx
+    service:
+      name: nginx
+      state: restarted
+      enabled: yes
+
+  - name: Download Passbolt CE
+    get_url:
+      url: "https://github.com/passbolt/passbolt_api/releases/download/v{{ passbolt_version }}/passbolt-ce-{{ passbolt_version }}.tar.gz"
+      dest: "/tmp/passbolt.tar.gz"
+
+  - name: Extract Passbolt
+    unarchive:
+      src: "/tmp/passbolt.tar.gz"
+      dest: "{{ passbolt_install_dir }}"
+      remote_src: yes
+      copy: no
+
+  - name: Set permissions
+    file:
+      path: "{{ passbolt_install_dir }}"
+      owner: www-data
+      group: www-data
+      recurse: yes
+
+  - name: Copy config file
+    copy:
+      src: "{{ passbolt_install_dir }}/config/passbolt.default.php"
+      dest: "{{ passbolt_install_dir }}/config/passbolt.php"
+      remote_src: yes
+      owner: www-data
+      group: www-data
+
+  - name: Configure database in passbolt.php
+    lineinfile:
+      path: "{{ passbolt_install_dir }}/config/passbolt.php"
+      regexp: "'username' => '.*'"
+      line: "    'username' => '{{ db_user }}',"
+    notify: restart php-fpm
+
+  - name: Configure database password in passbolt.php
+    lineinfile:
+      path: "{{ passbolt_install_dir }}/config/passbolt.php"
+      regexp: "'password' => '.*'"
+      line: "    'password' => '{{ db_password }}',"
+    notify: restart php-fpm
+
+  - name: Install composer dependencies
+    ansible.builtin.shell: |
+      cd {{ passbolt_install_dir }}
+      curl -sS https://getcomposer.org/installer | php
+      php composer.phar install --no-dev
+    args:
+      chdir: "{{ passbolt_install_dir }}"
+
+  - name: Run Passbolt installation script
+    ansible.builtin.shell: |
+      cd {{ passbolt_install_dir }}
+      sudo -u www-data bin/cake passbolt install
+    args:
+      chdir: "{{ passbolt_install_dir }}"
+
+  handlers:
+    - name: restart php-fpm
+      service:
+        name: php8.2-fpm
+        state: restarted
