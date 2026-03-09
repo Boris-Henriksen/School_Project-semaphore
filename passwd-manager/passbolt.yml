@@ -77,11 +77,11 @@
         login_user: root
         login_password: "{{ mysql_root_password }}"
 
-    - name: Clone Passbolt CE repository (MANUAL PATH)
-      ansible.builtin.shell: 
-        cmd: "git clone https://github.com {{ install_dir }}"
-      args:
-        creates: "{{ install_dir }}/bin/cake"
+    - name: Clone Passbolt CE repository
+      ansible.builtin.git:
+        repo: "https://github.com/passbolt/passbolt_api.git"
+        dest: "{{ install_dir }}"
+        version: "master"
 
     - name: Set ownership for Install Directory
       ansible.builtin.file:
