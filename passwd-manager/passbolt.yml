@@ -1,17 +1,23 @@
 ---
-- name: Install Passbolt CE (Dynamic Latest Release)
+- name: Install Passbolt CE (Manual version)
   hosts: passbolt
   become: true
 
   vars:
+    # --- Database ---
     db_name: passbolt
     db_user: passboltadmin
     db_password: "Merc1234!"
     mysql_root_password: "Merc1234!"
 
+    # --- Server / paths ---
     server_name: passbolt.dk-prod.lan
     install_dir: /var/www/passbolt
     php_timezone: Europe/Copenhagen
+
+    # --- Passbolt version ---
+    passbolt_version: "v5.7.2"
+    passbolt_url: "https://github.com/passbolt/passbolt/releases/download/{{ passbolt_version }}/passbolt-ce-{{ passbolt_version }}.tar.gz"
 
   tasks:
 
@@ -71,42 +77,11 @@
       - "php{{ php_version }}-fpm"
 
   # --------------------------------
-  # Dynamically get latest Passbolt release
+  # Download & extract Passbolt
   # --------------------------------
-  - name: Get list of releases from GitHub (passbolt repo)
-    ansible.builtin.uri:
-      url: "https://api.github.com/repos/passbolt/passbolt/releases"
-      return_content: yes
-    register: gh_releases
-
-  - name: Parse tar.gz URLs from releases
-    ansible.builtin.set_fact:
-      passbolt_asset_list: >-
-        {{
-          gh_releases.json
-          | map(attribute='assets')
-          | sum(start=[])
-          | map(attribute='browser_download_url')
-          | select("search", "\\.tar\\.gz$")
-          | list
-        }}
-
-  - name: Fail if no tar.gz asset found
-    ansible.builtin.fail:
-      msg: "Could not find any Passbolt tar.gz release in GitHub API results"
-    when: passbolt_asset_list | length == 0
-
-  - name: Set newest release URL
-    ansible.builtin.set_fact:
-      passbolt_release_url: "{{ passbolt_asset_list[0] }}"
-
-  - name: Debug release url
-    ansible.builtin.debug:
-      msg: "Using Passbolt release at {{ passbolt_release_url }}"
-
-  - name: Download latest Passbolt release
+  - name: Download Passbolt release {{ passbolt_version }}
     ansible.builtin.get_url:
-      url: "{{ passbolt_release_url }}"
+      url: "{{ passbolt_url }}"
       dest: /tmp/passbolt.tar.gz
 
   - name: Extract Passbolt
