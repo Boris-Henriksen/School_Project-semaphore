@@ -1,87 +1,155 @@
 ---
-- name: Install Passbolt CE via official installer (non-interactive)
+- name: Install Passbolt CE server (Non-Interactive)
   hosts: passbolt
   become: true
-
   vars:
-    # --- Database ---
-    db_name: passbolt
-    db_user: passboltadmin
+    db_name: "passbolt"
+    db_user: "passboltadmin"
     db_password: "Merc1234!"
     mysql_root_password: "Merc1234!"
-
-    # --- Server / paths ---
-    server_name: passbolt.dk-prod.lan
-    php_timezone: Europe/Copenhagen
+    server_name: "passbolt.dk-prod.lan"
+    php_timezone: "Europe/Copenhagen"
 
   tasks:
 
-  # --------------------------------
-  # Update system & install prerequisites
-  # --------------------------------
-  - name: Update apt cache
-    ansible.builtin.apt:
-      update_cache: yes
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
 
-  - name: Install prerequisites
-    ansible.builtin.apt:
-      name:
-        - curl
-        - gnupg
-        - lsb-release
-        - ca-certificates
-        - wget
-      state: present
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - mariadb-server
+          - python3-pymysql
+          - php-fpm
+          - php-mysql
+          - php-gd
+          - php-cli
+          - php-curl
+          - php-mbstring
+          - php-xml
+          - php-gnupg
+          - git
+          - unzip
+          - composer
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - wget
+        state: present
 
-  # --------------------------------
-  # Download official Passbolt installer
-  # --------------------------------
-  - name: Download Passbolt repo installer
-    ansible.builtin.get_url:
-      url: "https://download.passbolt.com/ce/installer/passbolt-repo-setup.ce.sh"
-      dest: "/tmp/passbolt-repo-setup.ce.sh"
-      mode: "0755"
+    - name: Get installed PHP version
+      ansible.builtin.command: php -r "echo PHP_VERSION;"
+      register: php_version_raw
+      changed_when: false
 
-  # --------------------------------
-  # Run Passbolt installer (non-interactive)
-  # --------------------------------
-  - name: Run Passbolt repo installer (non-interactive)
-    ansible.builtin.shell: >
-      DEBIAN_FRONTEND=noninteractive bash /tmp/passbolt-repo-setup.ce.sh
-    environment:
-      DEBIAN_FRONTEND: noninteractive
+    - name: Set PHP major.minor version fact
+      ansible.builtin.set_fact:
+        php_version: "{{ php_version_raw.stdout | regex_search('^([0-9]+\\.[0-9]+)') }}"
 
-  # --------------------------------
-  # Install Passbolt CE Server package
-  # --------------------------------
-  - name: Install Passbolt CE Server
-    ansible.builtin.apt:
-      name: passbolt-ce-server
-      state: present
-      update_cache: yes
+    - name: Start and enable services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - nginx
+        - mariadb
+        - "php{{ php_version }}-fpm"
 
-  # --------------------------------
-  # Configure MariaDB (database & user)
-  # --------------------------------
-  - name: Set MariaDB root password
-    community.mysql.mysql_user:
-      name: root
-      password: "{{ mysql_root_password }}"
-      login_unix_socket: /var/run/mysqld/mysqld.sock
-      check_implicit_admin: yes
+    - name: Configure PHP timezone
+      ansible.builtin.lineinfile:
+        path: "/etc/php/{{ php_version }}/fpm/php.ini"
+        regexp: '^;?date.timezone ='
+        line: "date.timezone = {{ php_timezone }}"
+      notify: Restart PHP-FPM
 
-  - name: Create Passbolt database
-    community.mysql.mysql_db:
-      name: "{{ db_name }}"
-      state: present
-      login_user: root
-      login_password: "{{ mysql_root_password }}"
+    - name: Add Passbolt repo key
+      ansible.builtin.apt_key:
+        url: https://download.passbolt.com/ce/ubuntu/passbolt.gpg
+        state: present
 
-  - name: Create Passbolt DB user
-    community.mysql.mysql_user:
-      name: "{{ db_user }}"
-      password: "{{ db_password }}"
-      priv: "{{ db_name }}.*:ALL"
-      state: present
-      login_user: root
-      login_password: "{{ mysql_root_password }}"
+    - name: Add Passbolt CE repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://download.passbolt.com/ce/ubuntu focal stable"
+        state: present
+
+    - name: Update apt cache after adding Passbolt repo
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Passbolt CE package
+      ansible.builtin.apt:
+        name: passbolt-ce-server
+        state: present
+
+    - name: Configure Nginx for Passbolt
+      ansible.builtin.copy:
+        dest: /etc/nginx/sites-available/passbolt
+        content: |
+          server {
+              listen 80;
+              server_name {{ server_name }};
+              root /usr/share/php/passbolt/webroot;
+              index index.php;
+
+              location / {
+                  try_files $uri $uri/ /index.php?$args;
+              }
+
+              location ~ \.php$ {
+                  include snippets/fastcgi-php.conf;
+                  fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
+                  fastcgi_param HTTPS on;
+                  fastcgi_param HTTP_X_FORWARDED_PROTO https;
+              }
+          }
+      notify: Restart Nginx
+
+    - name: Enable Passbolt site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/passbolt
+        dest: /etc/nginx/sites-enabled/passbolt
+        state: link
+
+    - name: Remove default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    # --- Database configuration (MariaDB) ---
+    - name: Set MariaDB root password
+      community.mysql.mysql_user:
+        name: root
+        password: "{{ mysql_root_password }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        check_implicit_admin: yes
+
+    - name: Create Passbolt database
+      community.mysql.mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+    - name: Create Passbolt database user
+      community.mysql.mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+  handlers:
+    - name: Restart Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+
+    - name: Restart PHP-FPM
+      ansible.builtin.service:
+        name: "php{{ php_version }}-fpm"
+        state: restarted
