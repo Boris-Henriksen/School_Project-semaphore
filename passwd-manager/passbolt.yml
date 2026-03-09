@@ -1,5 +1,5 @@
 ---
-- name: Install Passbolt CE via official installer
+- name: Install Passbolt CE via official installer (non-interactive)
   hosts: passbolt
   become: true
 
@@ -17,7 +17,7 @@
   tasks:
 
   # --------------------------------
-  # Update packages and install prerequisites
+  # Update system & install prerequisites
   # --------------------------------
   - name: Update apt cache
     ansible.builtin.apt:
@@ -29,6 +29,8 @@
         - curl
         - gnupg
         - lsb-release
+        - ca-certificates
+        - wget
       state: present
 
   # --------------------------------
@@ -40,11 +42,17 @@
       dest: "/tmp/passbolt-repo-setup.ce.sh"
       mode: "0755"
 
-  - name: Run Passbolt repo installer
-    ansible.builtin.command: bash /tmp/passbolt-repo-setup.ce.sh
+  # --------------------------------
+  # Run Passbolt installer (non-interactive)
+  # --------------------------------
+  - name: Run Passbolt repo installer (non-interactive)
+    ansible.builtin.shell: >
+      DEBIAN_FRONTEND=noninteractive bash /tmp/passbolt-repo-setup.ce.sh
+    environment:
+      DEBIAN_FRONTEND: noninteractive
 
   # --------------------------------
-  # Install Passbolt CE server
+  # Install Passbolt CE Server package
   # --------------------------------
   - name: Install Passbolt CE Server
     ansible.builtin.apt:
@@ -53,7 +61,7 @@
       update_cache: yes
 
   # --------------------------------
-  # Database setup (MariaDB) at the end
+  # Configure MariaDB (database & user)
   # --------------------------------
   - name: Set MariaDB root password
     community.mysql.mysql_user:
