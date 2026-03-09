@@ -29,11 +29,9 @@
 
   - name: Add PHP repository
     ansible.builtin.shell: |
-      add-apt-repository ppa:ondrej/php -y
-      apt update
-    args:
-      warn: false
-
+      add-apt-repository -y ppa:ondrej/php
+    become: yes
+  
   - name: Install PHP 8.2 + extensions
     apt:
       name:
