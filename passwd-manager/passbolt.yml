@@ -1,5 +1,5 @@
 ---
-- name: Install Passbolt CE (Fast Release Method)
+- name: Install Passbolt CE (Dynamic Latest Release)
   hosts: passbolt
   become: true
 
@@ -97,11 +97,22 @@
       login_password: "{{ mysql_root_password }}"
 
   # --------------------------------
-  # Download and extract Passbolt
+  # Dynamically get latest Passbolt release
   # --------------------------------
-  - name: Download Passbolt release
+  - name: Get list of releases from GitHub
+    ansible.builtin.uri:
+      url: "https://api.github.com/repos/passbolt/passbolt_api/releases"
+      return_content: yes
+    register: gh_releases
+
+  - name: Extract newest Passbolt tar.gz URL
+    ansible.builtin.set_fact:
+      passbolt_release_url: >-
+        {{ gh_releases.json[0].assets | selectattr('browser_download_url','search','.tar.gz$') | map(attribute='browser_download_url') | list | first }}
+
+  - name: Download latest Passbolt release
     ansible.builtin.get_url:
-      url: https://github.com/passbolt/passbolt_api/releases/latest/download/passbolt-ce-latest.tar.gz
+      url: "{{ passbolt_release_url }}"
       dest: /tmp/passbolt.tar.gz
 
   - name: Extract Passbolt
