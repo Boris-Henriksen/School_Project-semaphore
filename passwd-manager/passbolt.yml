@@ -1,10 +1,8 @@
 ---
-- name: Setup Passbolt CE server (Dynamisk PHP & Proxy Ready)
+- name: Setup Passbolt CE server (Final Fix)
   hosts: passbolt
   become: true
   vars:
-    # Vi lægger URL'en her for at undgå parsing-fejl i shell-modulet
-    passbolt_repo_url: "https://github.com"
     db_name: "passbolt"
     db_user: "passboltadmin"
     db_password: "SkiftMigNu123!"
@@ -79,9 +77,9 @@
         login_user: root
         login_password: "{{ mysql_root_password }}"
 
-    - name: Clone Passbolt CE repository
+    - name: Clone Passbolt CE repository (MANUAL PATH)
       ansible.builtin.shell: 
-        cmd: "git clone {{ passbolt_repo_url }} {{ install_dir }}"
+        cmd: "git clone https://github.com {{ install_dir }}"
       args:
         creates: "{{ install_dir }}/bin/cake"
 
@@ -108,7 +106,7 @@
         line: "date.timezone = {{ php_timezone }}"
       notify: Restart PHP-FPM
 
-    - name: Configure Nginx for Passbolt (Reverse Proxy Friendly)
+    - name: Configure Nginx for Passbolt
       ansible.builtin.copy:
         dest: /etc/nginx/sites-available/passbolt
         content: |
