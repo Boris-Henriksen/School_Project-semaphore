@@ -105,10 +105,30 @@
       return_content: yes
     register: gh_releases
 
-  - name: Extract newest Passbolt tar.gz URL
+  - name: Parse tar.gz URLs from releases
     ansible.builtin.set_fact:
-      passbolt_release_url: >-
-        {{ gh_releases.json[0].assets | selectattr('browser_download_url','search','.tar.gz$') | map(attribute='browser_download_url') | list | first }}
+      passbolt_asset_list: >-
+        {{
+          gh_releases.json
+          | map(attribute='assets')
+          | sum(start=[])
+          | map(attribute='browser_download_url')
+          | select("search", "\\.tar\\.gz$")
+          | list
+        }}
+
+  - name: Fail if no tar.gz asset found
+    ansible.builtin.fail:
+      msg: "Could not find any Passbolt tar.gz release in GitHub API results"
+    when: passbolt_asset_list | length == 0
+
+  - name: Set newest release URL
+    ansible.builtin.set_fact:
+      passbolt_release_url: "{{ passbolt_asset_list[0] }}"
+
+  - name: Debug release url
+    ansible.builtin.debug:
+      msg: "Using Passbolt release at {{ passbolt_release_url }}"
 
   - name: Download latest Passbolt release
     ansible.builtin.get_url:
