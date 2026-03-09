@@ -5,7 +5,7 @@
   vars:
     db_name: "passbolt"
     db_user: "passboltadmin"
-    db_password: "SkiftMigNu123!"
+    db_password: "Merc1234!"
     mysql_root_password: "Merc1234!"
     server_name: "passbolt.dk-prod.lan"
     install_dir: "/var/www/passbolt"
