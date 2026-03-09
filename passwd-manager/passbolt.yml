@@ -1,125 +1,65 @@
 ---
-- name: Install Passbolt CE server (Non-Interactive)
+- name: Install Passbolt CE server (official installer)
   hosts: passbolt
   become: true
   vars:
-    db_name: "passbolt"
-    db_user: "passboltadmin"
+    db_name: passbolt
+    db_user: passboltadmin
     db_password: "Merc1234!"
     mysql_root_password: "Merc1234!"
-    server_name: "passbolt.dk-prod.lan"
+    server_name: passbolt.dk-prod.lan
     php_timezone: "Europe/Copenhagen"
+    # Distributions argument for installer: focal (Ubuntu 20.04/22.04)
+    passbolt_dist: "focal"
 
   tasks:
-
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
 
-    - name: Install required packages
+    - name: Install prerequisites
       ansible.builtin.apt:
         name:
-          - nginx
-          - mariadb-server
-          - python3-pymysql
-          - php-fpm
-          - php-mysql
-          - php-gd
-          - php-cli
-          - php-curl
-          - php-mbstring
-          - php-xml
-          - php-gnupg
-          - git
-          - unzip
-          - composer
-          - apt-transport-https
-          - ca-certificates
           - curl
           - gnupg
+          - lsb-release
+          - ca-certificates
           - wget
         state: present
 
-    - name: Get installed PHP version
-      ansible.builtin.command: php -r "echo PHP_VERSION;"
-      register: php_version_raw
-      changed_when: false
+    - name: Download Passbolt installer script
+      ansible.builtin.get_url:
+        url: "https://download.passbolt.com/ce/installer/passbolt-repo-setup.ce.sh"
+        dest: "/tmp/passbolt-repo-setup.ce.sh"
+        mode: "0755"
 
-    - name: Set PHP major.minor version fact
-      ansible.builtin.set_fact:
-        php_version: "{{ php_version_raw.stdout | regex_search('^([0-9]+\\.[0-9]+)') }}"
+    - name: Download SHA512 sum for installer
+      ansible.builtin.get_url:
+        url: "https://github.com/passbolt/passbolt-dep-scripts/releases/latest/download/passbolt-ce-SHA512SUM.txt"
+        dest: "/tmp/passbolt-ce-SHA512SUM.txt"
 
-    - name: Start and enable services
-      ansible.builtin.service:
-        name: "{{ item }}"
-        state: started
-        enabled: yes
-      loop:
-        - nginx
-        - mariadb
-        - "php{{ php_version }}-fpm"
+    - name: Verify installer checksum
+      ansible.builtin.command:
+        cmd: "sha512sum -c /tmp/passbolt-ce-SHA512SUM.txt"
+      args:
+        chdir: /tmp
 
-    - name: Configure PHP timezone
-      ansible.builtin.lineinfile:
-        path: "/etc/php/{{ php_version }}/fpm/php.ini"
-        regexp: '^;?date.timezone ='
-        line: "date.timezone = {{ php_timezone }}"
-      notify: Restart PHP-FPM
+    - name: Run Passbolt repo installer script
+      ansible.builtin.shell: >
+        DEBIAN_FRONTEND=noninteractive bash /tmp/passbolt-repo-setup.ce.sh {{ passbolt_dist }}
+      environment:
+        DEBIAN_FRONTEND: noninteractive
 
-    - name: Add Passbolt repo key
-      ansible.builtin.apt_key:
-        url: https://download.passbolt.com/ce/ubuntu/passbolt.gpg
-        state: present
-
-    - name: Add Passbolt CE repository
-      ansible.builtin.apt_repository:
-        repo: "deb https://download.passbolt.com/ce/ubuntu focal stable"
-        state: present
-
-    - name: Update apt cache after adding Passbolt repo
+    - name: Update apt cache after adding repo
       ansible.builtin.apt:
         update_cache: yes
 
-    - name: Install Passbolt CE package
+    - name: Install Passbolt CE Server
       ansible.builtin.apt:
         name: passbolt-ce-server
         state: present
 
-    - name: Configure Nginx for Passbolt
-      ansible.builtin.copy:
-        dest: /etc/nginx/sites-available/passbolt
-        content: |
-          server {
-              listen 80;
-              server_name {{ server_name }};
-              root /usr/share/php/passbolt/webroot;
-              index index.php;
-
-              location / {
-                  try_files $uri $uri/ /index.php?$args;
-              }
-
-              location ~ \.php$ {
-                  include snippets/fastcgi-php.conf;
-                  fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
-                  fastcgi_param HTTPS on;
-                  fastcgi_param HTTP_X_FORWARDED_PROTO https;
-              }
-          }
-      notify: Restart Nginx
-
-    - name: Enable Passbolt site
-      ansible.builtin.file:
-        src: /etc/nginx/sites-available/passbolt
-        dest: /etc/nginx/sites-enabled/passbolt
-        state: link
-
-    - name: Remove default Nginx site
-      ansible.builtin.file:
-        path: /etc/nginx/sites-enabled/default
-        state: absent
-
-    # --- Database configuration (MariaDB) ---
+    # MariaDB setup at end
     - name: Set MariaDB root password
       community.mysql.mysql_user:
         name: root
@@ -134,7 +74,7 @@
         login_user: root
         login_password: "{{ mysql_root_password }}"
 
-    - name: Create Passbolt database user
+    - name: Create Passbolt DB user
       community.mysql.mysql_user:
         name: "{{ db_user }}"
         password: "{{ db_password }}"
@@ -142,14 +82,3 @@
         state: present
         login_user: root
         login_password: "{{ mysql_root_password }}"
-
-  handlers:
-    - name: Restart Nginx
-      ansible.builtin.service:
-        name: nginx
-        state: restarted
-
-    - name: Restart PHP-FPM
-      ansible.builtin.service:
-        name: "php{{ php_version }}-fpm"
-        state: restarted
