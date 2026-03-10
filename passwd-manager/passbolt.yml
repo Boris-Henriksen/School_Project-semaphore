@@ -26,6 +26,8 @@
           - git
           - unzip
           - curl
+          - composer
+          - gnupg
           - php-fpm
           - php-cli
           - php-mysql
@@ -37,13 +39,7 @@
           - php-zip
           - php-bcmath
           - php-gmp
-          - composer
-          - gnupg
-        state: present
-
-    - name: Install MySQL python library
-      ansible.builtin.apt:
-        name: python3-pymysql
+          - python3-pymysql
         state: present
 
     - name: Start and enable services
@@ -84,7 +80,8 @@
         version: master
 
     - name: Install Passbolt dependencies with composer
-      ansible.builtin.command: composer install --no-dev
+      ansible.builtin.command: >
+        composer install --no-dev --no-interaction --optimize-autoloader
       args:
         chdir: "{{ passbolt_install_dir }}"
 
