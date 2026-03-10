@@ -1,68 +1,71 @@
 ---
-- name: Install Passbolt on Ubuntu 24
+- name: Install Passbolt CE on Ubuntu 24
   hosts: passbolt
   become: true
   vars:
-    passbolt_install_dir: /var/www/passbolt
-    mysql_root_password: "Merc1234!"
     passbolt_db_name: "passbolt"
     passbolt_db_user: "passbolt"
     passbolt_db_password: "Merc1234!"
-    php_timezone: "Europe/Copenhagen"
+    passbolt_install_dir: "/var/www/passbolt"
+    mysql_root_password: "Merc1234!"
     server_name: "passbolt.dk-prod.lan"
+    php_timezone: "Europe/Copenhagen"
+    passbolt_release_api: "https://api.github.com/repos/passbolt/passbolt/releases/latest"
 
   pre_tasks:
-    - name: Ensure python3-pip is installed
+    - name: Ensure Python MySQL library is installed
       ansible.builtin.apt:
-        name: python3-pip
+        name:
+          - python3-pip
+          - python3-dev
+          - libmysqlclient-dev
         state: present
-        update_cache: yes
 
-    - name: Ensure Python MySQL client is installed for Ansible
+    - name: Ensure mysqlclient is installed for Ansible
       ansible.builtin.pip:
         name: mysqlclient
-        executable: pip3
 
-  tasks:
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
-        cache_valid_time: 3600
 
+  tasks:
     - name: Install required packages
       ansible.builtin.apt:
         name:
           - nginx
           - mariadb-server
-          - software-properties-common
-          - lsb-release
-          - unzip
           - wget
+          - unzip
+          - git
           - curl
           - gnupg
-          - ca-certificates
         state: present
 
-    - name: Add PHP repository
-      ansible.builtin.apt_repository:
-        repo: ppa:ondrej/php
-        state: present
-        update_cache: yes
+    - name: Get latest PHP FPM version available
+      ansible.builtin.shell: |
+        apt-cache search php | grep -E '^php[0-9]+\.[0-9]+-fpm' | awk '{print $1}' | sort -V | tail -n1
+      register: php_latest
+      changed_when: false
 
-    - name: Install latest PHP and required extensions
+    - name: Set PHP version fact
+      ansible.builtin.set_fact:
+        php_version: "{{ php_latest.stdout | regex_search('php([0-9]+\\.[0-9]+)-fpm', '\\1') }}"
+
+    - name: Install PHP and required extensions dynamically
       ansible.builtin.apt:
         name:
-          - php8.3-fpm
-          - php8.3-mysql
-          - php8.3-gd
-          - php8.3-curl
-          - php8.3-mbstring
-          - php8.3-xml
-          - php8.3-bcmath
-          - php8.3-intl
-          - php8.3-zip
-          - php8.3-gnupg
-          - php8.3-gmp
+          - "php{{ php_version }}-fpm"
+          - "php{{ php_version }}-mysql"
+          - "php{{ php_version }}-gd"
+          - "php{{ php_version }}-curl"
+          - "php{{ php_version }}-mbstring"
+          - "php{{ php_version }}-xml"
+          - "php{{ php_version }}-bcmath"
+          - "php{{ php_version }}-intl"
+          - "php{{ php_version }}-zip"
+          - "php{{ php_version }}-gnupg"
+          - "php{{ php_version }}-gmp"
         state: present
 
     - name: Start and enable Nginx and MariaDB
@@ -75,83 +78,87 @@
         - mariadb
 
     - name: Ensure MariaDB root password is set
-      ansible.builtin.mysql_user:
+      community.mysql.mysql_user:
         login_user: root
-        login_password: ""
-        user: root
+        login_password: ''
+        name: root
+        host: localhost
         password: "{{ mysql_root_password }}"
-        host_all: yes
         check_implicit_admin: yes
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        state: present
+        priv: "*.*:ALL,GRANT"
 
     - name: Create Passbolt database
-      ansible.builtin.mysql_db:
+      community.mysql.mysql_db:
         name: "{{ passbolt_db_name }}"
         encoding: utf8
         collation: utf8_general_ci
+        state: present
         login_user: root
         login_password: "{{ mysql_root_password }}"
-        state: present
 
     - name: Create Passbolt database user
-      ansible.builtin.mysql_user:
+      community.mysql.mysql_user:
         name: "{{ passbolt_db_user }}"
         password: "{{ passbolt_db_password }}"
         priv: "{{ passbolt_db_name }}.*:ALL"
         host: localhost
+        state: present
         login_user: root
         login_password: "{{ mysql_root_password }}"
-        state: present
 
-    - name: Get latest Passbolt release from GitHub
+    - name: Get latest Passbolt CE release download URL
       ansible.builtin.uri:
-        url: https://api.github.com/repos/passbolt/passbolt/releases/latest
+        url: "{{ passbolt_release_api }}"
         return_content: yes
-      register: github_release
-
-    - name: Set latest Passbolt version fact
-      ansible.builtin.set_fact:
-        passbolt_version: "{{ github_release.json.tag_name | regex_replace('^v','') }}"
+      register: passbolt_release
 
     - name: Set Passbolt download URL
       ansible.builtin.set_fact:
-        passbolt_download_url: "{{ github_release.json.assets | selectattr('name','search','passbolt-ce-.*\\.zip') | map(attribute='browser_download_url') | first }}"
+        passbolt_download_url: "{{ (passbolt_release.json.assets | selectattr('name','match','passbolt-ce-.*.tar.gz') | list)[0].browser_download_url }}"
+        passbolt_version: "{{ passbolt_release.json.tag_name }}"
 
-    - name: Ensure Passbolt install directory exists
+    - name: Download Passbolt latest release
+      ansible.builtin.get_url:
+        url: "{{ passbolt_download_url }}"
+        dest: "/tmp/passbolt.tar.gz"
+
+    - name: Create Passbolt install directory
       ansible.builtin.file:
         path: "{{ passbolt_install_dir }}"
         state: directory
         owner: www-data
         group: www-data
-        mode: '0755'
-
-    - name: Download Passbolt latest release zip
-      ansible.builtin.get_url:
-        url: "{{ passbolt_download_url }}"
-        dest: "/tmp/passbolt.zip"
+        mode: "0755"
 
     - name: Extract Passbolt
       ansible.builtin.unarchive:
-        src: "/tmp/passbolt.zip"
+        src: "/tmp/passbolt.tar.gz"
         dest: "{{ passbolt_install_dir }}"
         remote_src: yes
-        copy: no
-        owner: www-data
-        group: www-data
+        extra_opts: [--strip-components=1]
 
-    - name: Install Composer dependencies
+    - name: Install Composer
+      ansible.builtin.get_url:
+        url: https://getcomposer.org/installer
+        dest: /tmp/composer-setup.php
+        mode: "0755"
+
+    - name: Run Composer install for Passbolt
       ansible.builtin.shell: |
-        export COMPOSER_ALLOW_SUPERUSER=1
-        composer install --no-dev --no-interaction --optimize-autoloader
+        php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
+      args:
+        creates: /usr/local/bin/composer
+
+    - name: Install Passbolt dependencies
+      ansible.builtin.shell: |
+        composer install --no-dev --no-interaction --optimize-autoloader --ignore-platform-req=ext-gnupg
       args:
         chdir: "{{ passbolt_install_dir }}"
-      environment:
-        COMPOSER_ALLOW_SUPERUSER: "1"
+        creates: "{{ passbolt_install_dir }}/vendor"
 
     - name: Configure PHP timezone
       ansible.builtin.lineinfile:
-        path: "/etc/php/8.3/fpm/php.ini"
+        path: "/etc/php/{{ php_version }}/fpm/php.ini"
         regexp: '^;?date.timezone ='
         line: "date.timezone = {{ php_timezone }}"
         state: present
@@ -164,19 +171,15 @@
           server {
               listen 80;
               server_name {{ server_name }};
-
-              root {{ passbolt_install_dir }}/webroot;
+              root {{ passbolt_install_dir }};
               index index.php;
-
               location / {
-                  try_files $uri $uri/ /index.php;
+                  try_files $uri $uri/ /index.php?$query_string;
               }
-
               location ~ \.php$ {
                   include snippets/fastcgi-php.conf;
-                  fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+                  fastcgi_pass unix:/run/php/php{{ php_version }}-fpm.sock;
               }
-
               location ~ /\.ht {
                   deny all;
               }
@@ -202,5 +205,5 @@
 
     - name: Restart PHP-FPM
       ansible.builtin.service:
-        name: php8.3-fpm
+        name: "php{{ php_version }}-fpm"
         state: restarted
