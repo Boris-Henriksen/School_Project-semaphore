@@ -48,6 +48,8 @@
         ip: 10.20.10.115
       - name: semaphore
         ip: 10.20.10.115
+      - name: passbolt
+        ip: 10.20.10.115
 
 
 
@@ -91,6 +93,8 @@
             hostname: smtp.dk-prod.lan.
           - ip_last_octet: 115
             hostname: webmin.dk-prod.lan.
+          - ip_last_octet: 116
+            hostname: passbolt.dk-prod.lan.
 
 
 
