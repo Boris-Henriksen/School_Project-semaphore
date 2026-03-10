@@ -6,7 +6,7 @@
     mariadb_root_password: "Merc1234!"
     passbolt_db_name: "passbolt"
     passbolt_db_user: "passbolt"
-    passbolt_db_password: "Pass1234!"
+    passbolt_db_password: "Merc1234!"
     passbolt_install_dir: "/var/www/passbolt"
     passbolt_server_name: "passbolt.dk-prod.lan"
     php_timezone: "Europe/Copenhagen"
