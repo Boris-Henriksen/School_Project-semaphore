@@ -1,4 +1,3 @@
-```yaml
 ---
 - name: Setup Passbolt server with Nginx
   hosts: passbolt
