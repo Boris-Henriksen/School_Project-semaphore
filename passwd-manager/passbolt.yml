@@ -4,10 +4,10 @@
   become: true
   vars:
     passbolt_install_dir: /var/www/passbolt
-    mysql_root_password: "StrongRootPass123!"
+    mysql_root_password: "Merc1234!"
     passbolt_db_name: "passbolt"
     passbolt_db_user: "passbolt"
-    passbolt_db_password: "Passbolt123!"
+    passbolt_db_password: "Merc1234!"
     php_timezone: "Europe/Copenhagen"
     server_name: "passbolt.dk-prod.lan"
 
