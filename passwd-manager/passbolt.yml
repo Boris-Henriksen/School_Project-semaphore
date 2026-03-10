@@ -6,7 +6,7 @@
     passbolt_install_dir: "/var/www/passbolt"
     passbolt_db_name: "passbolt"
     passbolt_db_user: "passbolt"
-    passbolt_db_password: "Passb0lt123!"
+    passbolt_db_password: "Merc1234!"
     mysql_root_password: "Merc1234!"
     php_timezone: "Europe/Copenhagen"
     server_name: "passbolt.dk-prod.lan"
