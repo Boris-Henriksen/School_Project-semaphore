@@ -20,7 +20,7 @@
       - { name: "webmin", ip: "10.20.10.115", port: 10000, proto: "https" }
       - { name: "web", ip: "10.20.10.110", port: 80, proto: "http" }
       - { name: "semaphore", ip: "10.20.10.28", port: 3000, proto: "http" }
-      - { name: "passbolt", ip: "10.20.10.116", port: 80, proto: "http" }
+      - { name: "passbolt", ip: "10.20.10.116", port: 443, proto: "https" }
 
   tasks:
     - name: Install Nginx and OpenSSL
