@@ -30,9 +30,9 @@
       copy:
         dest: /etc/bind/named.conf.local
         content: |
-          zone "be.local" {
+          zone "dk.prod.lan" {
               type slave;
-              file "/var/cache/bind/db.be.local";
+              file "/var/cache/bind/db.dk-prod.lan";
               masters { {{ master_ip }}; };
           };
           zone "10.20.10.in-addr.arpa" {
